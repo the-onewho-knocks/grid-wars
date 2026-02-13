@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function Tile({ tile, onClick, userColorMap }) {
   const ownerColor =
     tile.ownerId && userColorMap[tile.ownerId]

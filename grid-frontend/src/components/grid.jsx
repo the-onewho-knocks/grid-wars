@@ -1,11 +1,8 @@
-import React from "react";
 import Tile from "./tile";
 
-export default function Grid({ tilesMap, onTileClick, userColorMap }) {
-  const tiles = Array.from(tilesMap.values());
-
+export default function Grid({ tiles, onTileClick, userColorMap }) {
   return (
-    <div className="grid">
+    <div className="grid-container">
       {tiles.map((tile) => (
         <Tile
           key={tile.id}
