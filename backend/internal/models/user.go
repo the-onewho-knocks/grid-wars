@@ -1,9 +1,7 @@
 package models
 
-import "github.com/gofrs/uuid"
-
 type User struct {
-	ID    uuid.UUID
+	ID    string
 	Name  string
 	Color string
 }

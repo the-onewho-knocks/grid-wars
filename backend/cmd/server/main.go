@@ -53,6 +53,8 @@ func main() {
 	gameService := service.NewGameService(db, tileRepo, rdb)
 	userService := service.NewUserService(userRepo)
 	leaderboardService := service.NewLeaderboardService(db)
+	userRepo = repository.NewUserRepository(db)
+	userService = service.NewUserService(userRepo)
 
 	_ = userService // remove later if unused
 
@@ -71,6 +73,7 @@ func main() {
 	r.Post("/capture", handlers.CaptureTileHandler(gameService))
 	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
 	r.Get("/ws", handlers.WSHandler(hub, gameService))
+	r.Post("/register", handlers.RegisterUserHandler(userService))
 
 	// Create HTTP server
 	server := &http.Server{

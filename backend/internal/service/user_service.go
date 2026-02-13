@@ -8,13 +8,13 @@ import (
 )
 
 type UserService struct {
-	users repository.UserRepository
+	repo repository.UserRepository
 }
 
-func NewUserService(users repository.UserRepository) *UserService {
-	return &UserService{users: users}
+func NewUserService(repo repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
 }
 
 func (s *UserService) Register(ctx context.Context, user models.User) error {
-	return s.users.Create(ctx, user)
+	return s.repo.Create(ctx, user)
 }
