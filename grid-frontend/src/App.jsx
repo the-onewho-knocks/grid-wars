@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { getTiles, getLeaderboard, registerUser, captureTile } from "./api/client";
 import { useWebSocket } from "./hooks/useWebSocket";
-import Grid from "./components/Grid";
+import Grid from "./components/grid";
 import Leaderboard from "./components/leaderboard";
 
 export default function App() {
