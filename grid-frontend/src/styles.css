@@ -4,14 +4,14 @@ body {
   font-family: "Inter", sans-serif;
   color: white;
 }
-
+/* 
 .app {
   display: flex;
   justify-content: center;
   gap: 40px;
   padding: 40px;
   position: relative;
-}
+} */
 
 .loading {
   padding: 40px;
@@ -85,6 +85,65 @@ body {
   color: white;
   cursor: pointer;
   font-weight: 600;
+}
+/* 
+.popup {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 0, 0, 0.9);
+  padding: 12px 24px;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 0 20px rgba(255,0,0,0.6);
+  animation: fadeInOut 2s ease forwards;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+} */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.main-content {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  padding: 20px 40px 40px;
+}
+
+.welcome {
+  background: rgba(255,255,255,0.08);
+  padding: 12px 24px;
+  border-radius: 30px;
+  backdrop-filter: blur(20px);
+  font-weight: 600;
+}
+
+.captured {
+  animation: capturePulse 0.4s ease;
+}
+
+@keyframes capturePulse {
+  0%   { transform: scale(0.5); }
+  50%  { transform: scale(1.4); }
+  100% { transform: scale(1); }
 }
 
 .popup {

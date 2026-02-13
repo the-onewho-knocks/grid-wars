@@ -11,7 +11,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
 
-  // 🔥 Load tiles + leaderboard together (for color mapping)
+  // Load tiles + leaderboard to reconstruct colors
   useEffect(() => {
     async function loadData() {
       try {
@@ -45,7 +45,7 @@ function App() {
     loadData();
   }, []);
 
-  // 🔥 Handle click
+  // Handle capture
   const handleTileClick = async (tileId) => {
     if (!user) return;
 
@@ -57,31 +57,40 @@ function App() {
       return;
     }
 
+    // Optimistic update
+    setTilesMap((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(tileId, {
+        ...tile,
+        ownerId: user.id,
+        color: user.color,
+      });
+      return newMap;
+    });
+
     try {
       await captureTile({
         tileId,
         userId: user.id,
       });
-
+    } catch (err) {
+      // Rollback
       setTilesMap((prev) => {
         const newMap = new Map(prev);
-        const tile = newMap.get(tileId);
-
         newMap.set(tileId, {
           ...tile,
-          ownerId: user.id,
-          color: user.color,
+          ownerId: null,
+          color: null,
         });
-
         return newMap;
       });
-    } catch (err) {
-      setMessage("This tile is already collected!");
+
+      setMessage("Tile already collected!");
       setTimeout(() => setMessage(null), 2000);
     }
   };
 
-  // 🔥 WebSocket update handler
+  // WebSocket updates
   const handleTileUpdate = useCallback((data) => {
     setTilesMap((prev) => {
       const newMap = new Map(prev);
@@ -103,15 +112,29 @@ function App() {
 
   return (
     <div className="app">
-      {!user && <Register onRegistered={setUser} />}
-      <Grid tilesMap={tilesMap} onTileClick={handleTileClick} />
-      <Leaderboard />
+
+      <header className="topbar">
+        {!user ? (
+          <Register onRegistered={setUser} />
+        ) : (
+          <div className="welcome">
+            Playing as{" "}
+            <span style={{ color: user.color }}>{user.name}</span>
+          </div>
+        )}
+      </header>
+
+      <div className="main-content">
+        <Grid tilesMap={tilesMap} onTileClick={handleTileClick} />
+        <Leaderboard />
+      </div>
 
       {message && (
         <div className="popup">
           {message}
         </div>
       )}
+
     </div>
   );
 }
