@@ -1,5 +1,5 @@
 import React from "react";
-import Tile from "./Tile";
+import Tile from "./tile";
 
 export default function Grid({ tilesMap, onTileClick, userColorMap }) {
   const tiles = Array.from(tilesMap.values());
