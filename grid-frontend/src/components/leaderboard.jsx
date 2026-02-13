@@ -1,21 +1,24 @@
-import { useEffect, useState } from "react";
-import { getLeaderboard } from "../api/client";
+import React from "react";
 
-export default function Leaderboard() {
-  const [leaders, setLeaders] = useState([]);
-
-  useEffect(() => {
-    getLeaderboard()
-      .then(setLeaders)
-      .catch(console.error);
-  }, []);
+export default function Leaderboard({ leaders }) {
+  const safeLeaders = Array.isArray(leaders) ? leaders : [];
 
   return (
     <div className="leaderboard">
-      <h2>Leaderboard</h2>
-      {leaders.map((u) => (
-        <div key={u.userId} style={{ color: u.color }}>
-          {u.name} — {u.count}
+      <h2>🏆 Leaderboard</h2>
+
+      {safeLeaders.length === 0 && (
+        <p className="empty">No players yet.</p>
+      )}
+
+      {safeLeaders.map((player) => (
+        <div key={player.userId} className="leader-row">
+          <span
+            className="color-dot"
+            style={{ background: player.color }}
+          />
+          <span className="leader-name">{player.name}</span>
+          <span className="leader-score">{player.count}</span>
         </div>
       ))}
     </div>

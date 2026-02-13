@@ -1,72 +1,113 @@
-import { useState, useEffect, useCallback } from "react";
-import { getTiles, captureTile, getLeaderboard } from "./api/client";
+import React, { useEffect, useState, useCallback } from "react";
+import { getTiles, getLeaderboard, registerUser, captureTile } from "./api/client";
 import { useWebSocket } from "./hooks/useWebSocket";
-import Grid from "./components/grid";
+import Grid from "./components/Grid";
 import Leaderboard from "./components/leaderboard";
-import Register from "./components/register";
 
-function App() {
+export default function App() {
   const [tilesMap, setTilesMap] = useState(new Map());
+  const [leaders, setLeaders] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState(null);
 
-  // Load tiles + leaderboard to reconstruct colors
+  // ===============================
+  // INITIAL LOAD
+  // ===============================
   useEffect(() => {
-    async function loadData() {
+    async function load() {
       try {
-        const [tiles, leaders] = await Promise.all([
+        const [tilesData, leaderboardData] = await Promise.all([
           getTiles(),
           getLeaderboard(),
         ]);
 
-        const colorMap = {};
-        leaders.forEach((u) => {
-          colorMap[u.userId] = u.color;
-        });
-
         const map = new Map();
 
-        tiles.forEach((t) => {
-          map.set(t.id, {
-            ...t,
-            color: t.ownerId ? colorMap[t.ownerId] : null,
-          });
+        (tilesData || []).forEach((tile) => {
+          map.set(tile.id, tile);
         });
 
         setTilesMap(map);
+        setLeaders(leaderboardData || []);
       } catch (err) {
-        console.error(err);
+        console.error("Initial load failed:", err);
       } finally {
         setLoading(false);
       }
     }
 
-    loadData();
+    load();
   }, []);
 
-  // Handle capture
+  // ===============================
+  // TILE UPDATE HANDLER
+  // ===============================
+  const handleTileUpdate = useCallback((data) => {
+    if (!data || !data.tileId) return;
+
+    setTilesMap((prev) => {
+      const updated = new Map(prev);
+      const existing = updated.get(data.tileId);
+
+      if (existing) {
+        updated.set(data.tileId, {
+          ...existing,
+          ownerId: data.ownerId,
+        });
+      }
+
+      return updated;
+    });
+
+    // Refresh leaderboard after update
+    refreshLeaderboard();
+  }, []);
+
+  // ===============================
+  // WEBSOCKET
+  // ===============================
+  useWebSocket(handleTileUpdate);
+
+  // ===============================
+  // REFRESH LEADERBOARD
+  // ===============================
+  const refreshLeaderboard = async () => {
+    try {
+      const data = await getLeaderboard();
+      setLeaders(data || []);
+    } catch (err) {
+      console.error("Leaderboard refresh failed:", err);
+    }
+  };
+
+  // ===============================
+  // USER REGISTER
+  // ===============================
+  const handleRegister = async (name, color) => {
+    try {
+      const id = crypto.randomUUID();
+
+      await registerUser({
+        id,
+        name,
+        color,
+      });
+
+      setUser({ id, name, color });
+      refreshLeaderboard();
+    } catch (err) {
+      alert("Registration failed");
+    }
+  };
+
+  // ===============================
+  // TILE CLICK
+  // ===============================
   const handleTileClick = async (tileId) => {
-    if (!user) return;
-
-    const tile = tilesMap.get(tileId);
-
-    if (tile.ownerId) {
-      setMessage("This tile is already collected!");
-      setTimeout(() => setMessage(null), 2000);
+    if (!user) {
+      alert("Please register first.");
       return;
     }
-
-    // Optimistic update
-    setTilesMap((prev) => {
-      const newMap = new Map(prev);
-      newMap.set(tileId, {
-        ...tile,
-        ownerId: user.id,
-        color: user.color,
-      });
-      return newMap;
-    });
 
     try {
       await captureTile({
@@ -74,69 +115,79 @@ function App() {
         userId: user.id,
       });
     } catch (err) {
-      // Rollback
-      setTilesMap((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(tileId, {
-          ...tile,
-          ownerId: null,
-          color: null,
-        });
-        return newMap;
-      });
-
-      setMessage("Tile already collected!");
-      setTimeout(() => setMessage(null), 2000);
+      if (err.message === "Tile already claimed") {
+        alert("⚠️ This tile is already collected!");
+      } else {
+        alert("Capture failed.");
+      }
     }
   };
 
-  // WebSocket updates
-  const handleTileUpdate = useCallback((data) => {
-    setTilesMap((prev) => {
-      const newMap = new Map(prev);
-      const tile = newMap.get(data.tileId);
-      if (!tile) return prev;
-
-      newMap.set(data.tileId, {
-        ...tile,
-        ownerId: data.ownerId,
-      });
-
-      return newMap;
-    });
-  }, []);
-
-  useWebSocket(handleTileUpdate);
-
-  if (loading) return <div className="loading">Loading...</div>;
+  // ===============================
+  // LOADING SCREEN
+  // ===============================
+  if (loading) {
+    return <div className="loading">Loading grid...</div>;
+  }
 
   return (
-    <div className="app">
-
-      <header className="topbar">
-        {!user ? (
-          <Register onRegistered={setUser} />
-        ) : (
-          <div className="welcome">
-            Playing as{" "}
-            <span style={{ color: user.color }}>{user.name}</span>
-          </div>
-        )}
-      </header>
-
-      <div className="main-content">
-        <Grid tilesMap={tilesMap} onTileClick={handleTileClick} />
-        <Leaderboard />
+    <div className="app-container">
+      <div className="main">
+        <Grid
+          tilesMap={tilesMap}
+          onTileClick={handleTileClick}
+          currentUser={user}
+        />
       </div>
 
-      {message && (
-        <div className="popup">
-          {message}
-        </div>
-      )}
+      <div className="sidebar">
+        {!user && (
+          <RegisterPanel onRegister={handleRegister} />
+        )}
 
+        <Leaderboard leaders={leaders} />
+      </div>
     </div>
   );
 }
 
-export default App;
+
+// ===============================
+// REGISTER PANEL COMPONENT
+// ===============================
+function RegisterPanel({ onRegister }) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("#ff0000");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (!name.trim()) {
+      alert("Enter your name");
+      return;
+    }
+
+    onRegister(name, color);
+  };
+
+  return (
+    <form className="register-panel" onSubmit={handleSubmit}>
+      <h2>Join the Game</h2>
+
+      <input
+        type="text"
+        placeholder="Your name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+
+      <input
+        type="color"
+        value={color}
+        onChange={(e) => setColor(e.target.value)}
+      />
+
+      <button type="submit">Join</button>
+    </form>
+  );
+}

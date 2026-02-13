@@ -7,7 +7,15 @@ if (!BASE_URL) {
 export async function getTiles() {
   const res = await fetch(`${BASE_URL}/tiles`);
   if (!res.ok) throw new Error("Failed to fetch tiles");
-  return res.json();
+  const data = await res.json();
+  return data || [];
+}
+
+export async function getLeaderboard() {
+  const res = await fetch(`${BASE_URL}/leaderboard`);
+  if (!res.ok) throw new Error("Failed leaderboard fetch");
+  const data = await res.json();
+  return data || [];
 }
 
 export async function registerUser(payload) {
@@ -30,11 +38,5 @@ export async function captureTile(payload) {
   if (res.status === 409) throw new Error("Tile already claimed");
   if (!res.ok) throw new Error("Capture failed");
 
-  return res.json();
-}
-
-export async function getLeaderboard() {
-  const res = await fetch(`${BASE_URL}/leaderboard`);
-  if (!res.ok) throw new Error("Failed leaderboard fetch");
   return res.json();
 }
