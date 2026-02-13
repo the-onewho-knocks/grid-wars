@@ -5,21 +5,14 @@ export default function Leaderboard() {
   const [leaders, setLeaders] = useState([]);
 
   useEffect(() => {
-    load();
+    getLeaderboard()
+      .then(setLeaders)
+      .catch(console.error);
   }, []);
-
-  async function load() {
-    try {
-      const data = await getLeaderboard();
-      setLeaders(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }
 
   return (
     <div className="leaderboard">
-      <h3>Leaderboard</h3>
+      <h2>Leaderboard</h2>
       {leaders.map((u) => (
         <div key={u.userId} style={{ color: u.color }}>
           {u.name} — {u.count}

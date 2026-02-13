@@ -1,26 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
-import { getTiles, captureTile } from "./api/client";
+import { getTiles, captureTile, getLeaderboard } from "./api/client";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Grid from "./components/grid";
 import Leaderboard from "./components/leaderboard";
 import Register from "./components/register";
-import "./styles.css";
 
 function App() {
   const [tilesMap, setTilesMap] = useState(new Map());
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState(null);
 
+  // 🔥 Load tiles + leaderboard together (for color mapping)
   useEffect(() => {
-    async function loadTiles() {
+    async function loadData() {
       try {
-        const tiles = await getTiles();
+        const [tiles, leaders] = await Promise.all([
+          getTiles(),
+          getLeaderboard(),
+        ]);
+
+        const colorMap = {};
+        leaders.forEach((u) => {
+          colorMap[u.userId] = u.color;
+        });
+
         const map = new Map();
 
-        tiles.slice(0, 1000).forEach((t) => {
+        tiles.forEach((t) => {
           map.set(t.id, {
             ...t,
-            color: null,
+            color: t.ownerId ? colorMap[t.ownerId] : null,
           });
         });
 
@@ -32,11 +42,20 @@ function App() {
       }
     }
 
-    loadTiles();
+    loadData();
   }, []);
 
+  // 🔥 Handle click
   const handleTileClick = async (tileId) => {
     if (!user) return;
+
+    const tile = tilesMap.get(tileId);
+
+    if (tile.ownerId) {
+      setMessage("This tile is already collected!");
+      setTimeout(() => setMessage(null), 2000);
+      return;
+    }
 
     try {
       await captureTile({
@@ -57,10 +76,12 @@ function App() {
         return newMap;
       });
     } catch (err) {
-      console.error(err.message);
+      setMessage("This tile is already collected!");
+      setTimeout(() => setMessage(null), 2000);
     }
   };
 
+  // 🔥 WebSocket update handler
   const handleTileUpdate = useCallback((data) => {
     setTilesMap((prev) => {
       const newMap = new Map(prev);
@@ -78,13 +99,19 @@ function App() {
 
   useWebSocket(handleTileUpdate);
 
-  if (loading) return <div className="loading">Loading grid...</div>;
+  if (loading) return <div className="loading">Loading...</div>;
 
   return (
     <div className="app">
       {!user && <Register onRegistered={setUser} />}
       <Grid tilesMap={tilesMap} onTileClick={handleTileClick} />
       <Leaderboard />
+
+      {message && (
+        <div className="popup">
+          {message}
+        </div>
+      )}
     </div>
   );
 }

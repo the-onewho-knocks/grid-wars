@@ -5,7 +5,7 @@ const Tile = React.memo(function Tile({ tile, onClick }) {
     <div
       className="tile"
       style={{
-        backgroundColor: tile.color || "rgba(255,255,255,0.05)",
+        backgroundColor: tile.color || "rgba(255,255,255,0.12)",
       }}
       onClick={() => onClick(tile.id)}
     />

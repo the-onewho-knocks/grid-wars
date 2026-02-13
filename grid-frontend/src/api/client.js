@@ -23,11 +23,9 @@ export async function captureTile(payload) {
     body: JSON.stringify(payload),
   });
 
-  if (res.status === 409) {
-    throw new Error("Tile already claimed");
-  }
-
+  if (res.status === 409) throw new Error("Tile already claimed");
   if (!res.ok) throw new Error("Capture failed");
+
   return res.json();
 }
 

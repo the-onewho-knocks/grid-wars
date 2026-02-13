@@ -4,8 +4,12 @@ export function useWebSocket(onTileUpdate) {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8080/ws");
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://localhost:8080/ws`);
+
     socketRef.current = ws;
+
+    ws.onopen = () => console.log("WebSocket connected");
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -14,12 +18,9 @@ export function useWebSocket(onTileUpdate) {
       }
     };
 
-    ws.onerror = () => {
-      console.error("WebSocket error");
-    };
+    ws.onerror = (err) => console.error("WebSocket error", err);
+    ws.onclose = () => console.warn("WebSocket closed");
 
-    return () => {
-      ws.close();
-    };
+    return () => ws.close();
   }, [onTileUpdate]);
 }
