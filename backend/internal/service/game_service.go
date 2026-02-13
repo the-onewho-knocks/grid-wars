@@ -53,3 +53,7 @@ tileID int , userID string)(*models.Tile , error){
 
 	return tile, nil
 }
+
+func (s *GameService) GetAllTiles(ctx context.Context) ([]models.Tile, error) {
+	return s.tiles.GetAll(ctx)
+}

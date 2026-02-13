@@ -1,40 +1,35 @@
 package realtime
 
-type Hub struct {
-	clients    map[*Client]bool
-	register   chan *Client
-	unregister chan *Client
-	broadcast  chan []byte
+import (
+	"net/http"
+
+	"grid-war/internal/service"
+
+	"github.com/gorilla/websocket"
+)
+
+type Client struct {
+	hub     *Hub
+	conn    *websocket.Conn
+	send    chan []byte
+	service *service.GameService
 }
 
-func NewHub() *Hub {
-	return &Hub{
-		clients:    make(map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		broadcast:  make(chan []byte),
+var Upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func NewClient(hub *Hub, conn *websocket.Conn, svc *service.GameService) *Client {
+	return &Client{
+		hub:     hub,
+		conn:    conn,
+		send:    make(chan []byte, 256),
+		service: svc,
 	}
 }
 
-func (h *Hub) Run() {
-	for {
-		select {
-		case client := <-h.register:
-			h.clients[client] = true
-
-		case client := <-h.unregister:
-			delete(h.clients, client)
-			close(client.send)
-
-		case message := <-h.broadcast:
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
-				}
-			}
-		}
-	}
+func (c *Client) Start() {
+	c.hub.Register(c)
+	go c.writePump()
+	go c.readPump()
 }
