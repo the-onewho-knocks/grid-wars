@@ -37,6 +37,50 @@ func main() {
 	if err != nil {
 		log.Fatal("postgres connection failed:", err)
 	}
+	// Auto-migrate tables
+func runMigrations(db *pgxpool.Pool) {
+	ctx := context.Background()
+
+	_, err := db.Exec(ctx, `
+	CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		color TEXT NOT NULL
+	);
+	`)
+	if err != nil {
+		log.Fatal("Failed creating users table:", err)
+	}
+
+	_, err = db.Exec(ctx, `
+	CREATE TABLE IF NOT EXISTS tiles (
+		id SERIAL PRIMARY KEY,
+		owner_id TEXT,
+		updated_at TIMESTAMP DEFAULT NOW()
+	);
+	`)
+	if err != nil {
+		log.Fatal("Failed creating tiles table:", err)
+	}
+
+	// Seed tiles if empty
+	var count int
+	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM tiles`).Scan(&count)
+	if err != nil {
+		log.Fatal("Failed counting tiles:", err)
+	}
+
+	if count == 0 {
+		log.Println("Seeding 1000 tiles...")
+		_, err = db.Exec(ctx, `
+			INSERT INTO tiles (id)
+			SELECT generate_series(1,1000);
+		`)
+		if err != nil {
+			log.Fatal("Failed seeding tiles:", err)
+		}
+	}
+}
 	defer db.Close()
 
 	// Connect Redis
