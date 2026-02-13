@@ -4,8 +4,16 @@ export function useWebSocket(onTileUpdate) {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://localhost:8080/ws`);
+    const base = import.meta.env.VITE_BACKEND_URL;
+
+    if (!base) {
+      console.error("VITE_BACKEND_URL not set");
+      return;
+    }
+
+    const wsBase = base.replace(/^https?:\/\//, "");
+    const ws = new WebSocket(`wss://${wsBase}/ws`);
+
     socketRef.current = ws;
 
     ws.onopen = () => console.log("WebSocket connected");

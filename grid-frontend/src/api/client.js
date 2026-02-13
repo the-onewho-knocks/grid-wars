@@ -1,4 +1,8 @@
-const BASE_URL = "https://grid-wars-production.up.railway.app";
+const BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+if (!BASE_URL) {
+  console.error("VITE_BACKEND_URL not set");
+}
 
 export async function getTiles() {
   const res = await fetch(`${BASE_URL}/tiles`);
