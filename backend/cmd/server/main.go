@@ -68,6 +68,7 @@ func main() {
 
 	r.Get("/health", handlers.HealthHandler())
 	r.Get("/tiles", handlers.GetTilesHandler(gameService))
+	r.Post("/capture", handlers.CaptureTileHandler(gameService))
 	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
 	r.Get("/ws", handlers.WSHandler(hub, gameService))
 

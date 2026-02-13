@@ -7,6 +7,11 @@ import (
 	"grid-war/internal/service"
 )
 
+type CaptureRequest struct {
+	TileID int    `json:"tileId"`
+	UserID string `json:"userId"`
+}
+
 func GetTilesHandler(svc *service.GameService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tiles, err := svc.GetAllTiles(r.Context())
@@ -26,5 +31,25 @@ func GetLeaderboardHandler(svc *service.LeaderboardService) http.HandlerFunc {
 			return
 		}
 		json.NewEncoder(w).Encode(data)
+	}
+}
+
+func CaptureTileHandler(svc *service.GameService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var req CaptureRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		tile, err := svc.CaptureTile(r.Context(), req.TileID, req.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
+		json.NewEncoder(w).Encode(tile)
 	}
 }
