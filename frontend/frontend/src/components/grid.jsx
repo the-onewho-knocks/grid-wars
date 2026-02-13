@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { captureTile } from "../api/api";
-//import Tile from "./Tile";
+import Tile from "./Tile";
 
 const TILE_IDS = Array.from({ length: 10000 }, (_, i) => i + 1);
 

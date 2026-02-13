@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
 	"grid-war/internal/cache"
@@ -23,51 +24,56 @@ import (
 
 func main() {
 
-	// Load .env file
+	// Load .env
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
 
-	// Load configuration (must have env variables set)
+	// Load config
 	cfg := config.Load()
 
-	// Connect to Postgres
+	// Connect Postgres
 	db, err := database.NewPostgres(cfg)
 	if err != nil {
 		log.Fatal("postgres connection failed:", err)
 	}
 	defer db.Close()
 
-	// Connect to Redis
+	// Connect Redis
 	rdb, err := cache.NewRedis(cfg)
 	if err != nil {
 		log.Fatal("redis connection failed:", err)
 	}
 	defer rdb.Close()
 
-	// Initialize repositories
+	// Repositories
 	tileRepo := repository.NewTileRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
-	// Initialize services
+	// Services
 	gameService := service.NewGameService(db, tileRepo, rdb)
 	userService := service.NewUserService(userRepo)
 	leaderboardService := service.NewLeaderboardService(db)
-	userRepo = repository.NewUserRepository(db)
-	userService = service.NewUserService(userRepo)
 
-	_ = userService // remove later if unused
-
-	// Initialize realtime hub
+	// Realtime hub
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	// Start Redis subscriber for distributed updates
+	// Redis subscriber
 	realtime.StartRedisSubscriber(context.Background(), rdb, hub)
 
-	// Setup router
+	// Router
 	r := chi.NewRouter()
 
+	// CORS middleware (IMPORTANT)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: false,
+	}))
+
+	// Routes
 	r.Get("/health", handlers.HealthHandler())
 	r.Get("/tiles", handlers.GetTilesHandler(gameService))
 	r.Post("/capture", handlers.CaptureTileHandler(gameService))
@@ -75,7 +81,7 @@ func main() {
 	r.Get("/ws", handlers.WSHandler(hub, gameService))
 	r.Post("/register", handlers.RegisterUserHandler(userService))
 
-	// Create HTTP server
+	// HTTP server
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: r,
@@ -89,7 +95,7 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown setup
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

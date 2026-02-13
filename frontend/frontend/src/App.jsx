@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { fetchTiles, fetchLeaderboard } from "./api/api";
-// import Grid from "./components/Grid";
-// import Leaderboard from "./components/Leaderboard";
-// import Register from "./components/Register";
+import Grid from "./components/Grid";
+import Leaderboard from "./components/Leaderboard";
+import Register from "./components/Register";
 import useWebSocket from "./hooks/useWebSockets";
 
 export default function App() {
