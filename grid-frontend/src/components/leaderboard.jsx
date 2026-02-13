@@ -5,7 +5,7 @@ export default function Leaderboard({ leaders }) {
 
   return (
     <div className="leaderboard">
-      <h2>🏆 Leaderboard</h2>
+      <h2> Leaderboard</h2>
 
       {safeLeaders.length === 0 && (
         <p className="empty">No players yet.</p>

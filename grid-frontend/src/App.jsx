@@ -7,12 +7,11 @@ import Leaderboard from "./components/leaderboard";
 export default function App() {
   const [tilesMap, setTilesMap] = useState(new Map());
   const [leaders, setLeaders] = useState([]);
+  const [userColorMap, setUserColorMap] = useState({});
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ===============================
-  // INITIAL LOAD
-  // ===============================
+  // ================= INITIAL LOAD =================
   useEffect(() => {
     async function load() {
       try {
@@ -21,14 +20,23 @@ export default function App() {
           getLeaderboard(),
         ]);
 
+        // Build tile map
         const map = new Map();
-
         (tilesData || []).forEach((tile) => {
           map.set(tile.id, tile);
         });
-
         setTilesMap(map);
-        setLeaders(leaderboardData || []);
+
+        // Leaderboard + color map
+        const safeLeaders = leaderboardData || [];
+        setLeaders(safeLeaders);
+
+        const colorMap = {};
+        safeLeaders.forEach((player) => {
+          colorMap[player.userId] = player.color;
+        });
+        setUserColorMap(colorMap);
+
       } catch (err) {
         console.error("Initial load failed:", err);
       } finally {
@@ -39,9 +47,7 @@ export default function App() {
     load();
   }, []);
 
-  // ===============================
-  // TILE UPDATE HANDLER
-  // ===============================
+  // ================= TILE UPDATE =================
   const handleTileUpdate = useCallback((data) => {
     if (!data || !data.tileId) return;
 
@@ -59,30 +65,31 @@ export default function App() {
       return updated;
     });
 
-    // Refresh leaderboard after update
     refreshLeaderboard();
   }, []);
 
-  // ===============================
-  // WEBSOCKET
-  // ===============================
   useWebSocket(handleTileUpdate);
 
-  // ===============================
-  // REFRESH LEADERBOARD
-  // ===============================
+  // ================= LEADERBOARD REFRESH =================
   const refreshLeaderboard = async () => {
     try {
       const data = await getLeaderboard();
-      setLeaders(data || []);
+      const safeData = data || [];
+
+      setLeaders(safeData);
+
+      const map = {};
+      safeData.forEach((player) => {
+        map[player.userId] = player.color;
+      });
+
+      setUserColorMap(map);
     } catch (err) {
       console.error("Leaderboard refresh failed:", err);
     }
   };
 
-  // ===============================
-  // USER REGISTER
-  // ===============================
+  // ================= REGISTER =================
   const handleRegister = async (name, color) => {
     try {
       const id = crypto.randomUUID();
@@ -95,14 +102,12 @@ export default function App() {
 
       setUser({ id, name, color });
       refreshLeaderboard();
-    } catch (err) {
+    } catch {
       alert("Registration failed");
     }
   };
 
-  // ===============================
-  // TILE CLICK
-  // ===============================
+  // ================= TILE CLICK =================
   const handleTileClick = async (tileId) => {
     if (!user) {
       alert("Please register first.");
@@ -123,9 +128,6 @@ export default function App() {
     }
   };
 
-  // ===============================
-  // LOADING SCREEN
-  // ===============================
   if (loading) {
     return <div className="loading">Loading grid...</div>;
   }
@@ -136,7 +138,7 @@ export default function App() {
         <Grid
           tilesMap={tilesMap}
           onTileClick={handleTileClick}
-          currentUser={user}
+          userColorMap={userColorMap}
         />
       </div>
 
@@ -144,7 +146,6 @@ export default function App() {
         {!user && (
           <RegisterPanel onRegister={handleRegister} />
         )}
-
         <Leaderboard leaders={leaders} />
       </div>
     </div>
@@ -152,21 +153,17 @@ export default function App() {
 }
 
 
-// ===============================
-// REGISTER PANEL COMPONENT
-// ===============================
+// ================= REGISTER PANEL =================
 function RegisterPanel({ onRegister }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState("#ff0000");
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
     if (!name.trim()) {
       alert("Enter your name");
       return;
     }
-
     onRegister(name, color);
   };
 

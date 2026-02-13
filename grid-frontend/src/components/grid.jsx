@@ -1,22 +1,19 @@
 import React from "react";
-import Tile from "./tile";
+import Tile from "./Tile";
 
-function Grid({ tilesMap, onTileClick }) {
+export default function Grid({ tilesMap, onTileClick, userColorMap }) {
   const tiles = Array.from(tilesMap.values());
-
-  console.log("Rendering tiles count:", tiles.length);
 
   return (
     <div className="grid">
-      {tiles.map((tile, index) => (
+      {tiles.map((tile) => (
         <Tile
-          key={tile?.id ?? index}
+          key={tile.id}
           tile={tile}
           onClick={onTileClick}
+          userColorMap={userColorMap}
         />
       ))}
     </div>
   );
 }
-
-export default React.memo(Grid);

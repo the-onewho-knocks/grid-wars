@@ -1,15 +1,16 @@
 import React from "react";
 
-const Tile = React.memo(function Tile({ tile, onClick }) {
+export default function Tile({ tile, onClick, userColorMap }) {
+  const ownerColor =
+    tile.ownerId && userColorMap[tile.ownerId]
+      ? userColorMap[tile.ownerId]
+      : "#1e1e1e";
+
   return (
     <div
-      className={`tile ${tile.ownerId ? "captured" : ""}`}
-      style={{
-        backgroundColor: tile.color || "rgba(255,255,255,0.15)",
-      }}
+      className="tile"
+      style={{ backgroundColor: ownerColor }}
       onClick={() => onClick(tile.id)}
     />
   );
-});
-
-export default Tile;
+}
