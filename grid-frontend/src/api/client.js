@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:8080";
+const BASE_URL = "https://grid-wars-production.up.railway.app";
 
 export async function getTiles() {
   const res = await fetch(`${BASE_URL}/tiles`);
