@@ -65,12 +65,16 @@ func main() {
 	// Router
 	r := chi.NewRouter()
 
-	// CORS middleware (IMPORTANT)
+	// CORS configuration (FIXED)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedOrigins: []string{
+			"http://localhost:5173", // Local dev
+			"https://unrivaled-khapse-1c17af.netlify.app", // Production frontend
+		},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
+		MaxAge:           300,
 	}))
 
 	// Routes
@@ -89,7 +93,7 @@ func main() {
 
 	// Start server
 	go func() {
-		log.Println("Server running on http://localhost:8080")
+		log.Println("Server running on port 8080")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("server failed:", err)
 		}
