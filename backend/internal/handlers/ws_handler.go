@@ -15,7 +15,7 @@ func WSHandler(hub *realtime.Hub, svc *service.GameService) http.HandlerFunc {
 			http.Error(w, "websocket upgrade failed", http.StatusBadRequest)
 			return
 		}
-
+		
 		client := realtime.NewClient(hub, conn, svc)
 		client.Start()
 	}
