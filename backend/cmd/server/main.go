@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"grid-war/internal/cache"
 	"grid-war/internal/config"
@@ -29,7 +30,6 @@ func main() {
 		log.Println("No .env file found")
 	}
 
-	// Load config
 	cfg := config.Load()
 
 	// Connect Postgres
@@ -37,7 +37,82 @@ func main() {
 	if err != nil {
 		log.Fatal("postgres connection failed:", err)
 	}
-	// Auto-migrate tables
+	defer db.Close()
+
+	// Run migrations
+	runMigrations(db)
+
+	// Connect Redis
+	rdb, err := cache.NewRedis(cfg)
+	if err != nil {
+		log.Fatal("redis connection failed:", err)
+	}
+	defer rdb.Close()
+
+	// Repositories
+	tileRepo := repository.NewTileRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	// Services
+	gameService := service.NewGameService(db, tileRepo, rdb)
+	userService := service.NewUserService(userRepo)
+	leaderboardService := service.NewLeaderboardService(db)
+
+	// Realtime hub
+	hub := realtime.NewHub()
+	go hub.Run()
+
+	realtime.StartRedisSubscriber(context.Background(), rdb, hub)
+
+	// Router
+	r := chi.NewRouter()
+
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins: []string{
+			"http://localhost:5173",
+			"https://unrivaled-khapse-1c17af.netlify.app",
+		},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: false,
+		MaxAge: 300,
+	}))
+
+	r.Get("/health", handlers.HealthHandler())
+	r.Get("/tiles", handlers.GetTilesHandler(gameService))
+	r.Post("/capture", handlers.CaptureTileHandler(gameService))
+	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
+	r.Get("/ws", handlers.WSHandler(hub, gameService))
+	r.Post("/register", handlers.RegisterUserHandler(userService))
+
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	go func() {
+		log.Println("Server running on port 8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal("server failed:", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatal("server forced to shutdown:", err)
+	}
+
+	log.Println("Server exited properly")
+}
+
 func runMigrations(db *pgxpool.Pool) {
 	ctx := context.Background()
 
@@ -63,7 +138,6 @@ func runMigrations(db *pgxpool.Pool) {
 		log.Fatal("Failed creating tiles table:", err)
 	}
 
-	// Seed tiles if empty
 	var count int
 	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM tiles`).Scan(&count)
 	if err != nil {
@@ -80,82 +154,4 @@ func runMigrations(db *pgxpool.Pool) {
 			log.Fatal("Failed seeding tiles:", err)
 		}
 	}
-}
-	defer db.Close()
-
-	// Connect Redis
-	rdb, err := cache.NewRedis(cfg)
-	if err != nil {
-		log.Fatal("redis connection failed:", err)
-	}
-	defer rdb.Close()
-
-	// Repositories
-	tileRepo := repository.NewTileRepository(db)
-	userRepo := repository.NewUserRepository(db)
-
-	// Services
-	gameService := service.NewGameService(db, tileRepo, rdb)
-	userService := service.NewUserService(userRepo)
-	leaderboardService := service.NewLeaderboardService(db)
-
-	// Realtime hub
-	hub := realtime.NewHub()
-	go hub.Run()
-
-	// Redis subscriber
-	realtime.StartRedisSubscriber(context.Background(), rdb, hub)
-
-	// Router
-	r := chi.NewRouter()
-
-	// CORS configuration (FIXED)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{
-			"http://localhost:5173", // Local dev
-			"https://unrivaled-khapse-1c17af.netlify.app", // Production frontend
-		},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
-
-	// Routes
-	r.Get("/health", handlers.HealthHandler())
-	r.Get("/tiles", handlers.GetTilesHandler(gameService))
-	r.Post("/capture", handlers.CaptureTileHandler(gameService))
-	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
-	r.Get("/ws", handlers.WSHandler(hub, gameService))
-	r.Post("/register", handlers.RegisterUserHandler(userService))
-
-	// HTTP server
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: r,
-	}
-
-	// Start server
-	go func() {
-		log.Println("Server running on port 8080")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("server failed:", err)
-		}
-	}()
-
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatal("server forced to shutdown:", err)
-	}
-
-	log.Println("Server exited properly")
 }
