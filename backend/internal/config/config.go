@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"log"
+	"os"
+)
 
 type Config struct {
 	PostgresURL string
@@ -9,14 +12,15 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		PostgresURL: getEnv("POSTGRES_URL", "postgres://postgres:root@localhost:5432/grid-war?sslmode=disable"),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
+		PostgresURL: mustGetEnv("POSTGRES_URL"),
+		RedisURL:    mustGetEnv("REDIS_URL"),
 	}
 }
 
-func getEnv(key, fallback string) string {
-	if val, ok := os.LookupEnv(key); ok {
-		return val
+func mustGetEnv(key string) string {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		log.Fatalf("Missing required environment variable: %s", key)
 	}
-	return fallback
+	return val
 }

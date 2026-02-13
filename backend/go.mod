@@ -6,6 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.17.3
 )
 

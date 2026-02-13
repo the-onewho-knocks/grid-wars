@@ -4,8 +4,13 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 
 	"grid-war/internal/cache"
 	"grid-war/internal/config"
@@ -17,33 +22,82 @@ import (
 )
 
 func main() {
+
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
+
+	// Load configuration (must have env variables set)
 	cfg := config.Load()
 
+	// Connect to Postgres
 	db, err := database.NewPostgres(cfg)
 	if err != nil {
-		log.Fatal("failed to connect to postgres:", err)
+		log.Fatal("postgres connection failed:", err)
 	}
 	defer db.Close()
 
+	// Connect to Redis
 	rdb, err := cache.NewRedis(cfg)
 	if err != nil {
-		log.Fatal("failed to connect to redis:", err)
+		log.Fatal("redis connection failed:", err)
 	}
 	defer rdb.Close()
+
+	// Initialize repositories
+	tileRepo := repository.NewTileRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	// Initialize services
+	gameService := service.NewGameService(db, tileRepo, rdb)
+	userService := service.NewUserService(userRepo)
+	leaderboardService := service.NewLeaderboardService(db)
+
+	_ = userService // remove later if unused
+
+	// Initialize realtime hub
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	tileRepo := repository.NewTileRepository(db)
-	gameService := service.NewGameService(db, tileRepo, rdb)
-
+	// Start Redis subscriber for distributed updates
 	realtime.StartRedisSubscriber(context.Background(), rdb, hub)
 
-	r.Get("/ws", handlers.WSHandler(hub, gameService))
-
+	// Setup router
 	r := chi.NewRouter()
 
-	// Handlers will be registered here later
+	r.Get("/health", handlers.HealthHandler())
+	r.Get("/tiles", handlers.GetTilesHandler(gameService))
+	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
+	r.Get("/ws", handlers.WSHandler(hub, gameService))
 
-	log.Println("Server running on :8080")
-	http.ListenAndServe(":8080", r)
+	// Create HTTP server
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	// Start server
+	go func() {
+		log.Println("Server running on http://localhost:8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal("server failed:", err)
+		}
+	}()
+
+	// Graceful shutdown setup
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatal("server forced to shutdown:", err)
+	}
+
+	log.Println("Server exited properly")
 }
