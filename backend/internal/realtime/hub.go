@@ -1,5 +1,7 @@
 package realtime
 
+import "log"
+
 type Hub struct {
 	clients    map[*Client]bool
 	register   chan *Client
@@ -44,10 +46,12 @@ func (h *Hub) Run() {
 
 func (h *Hub) Register(c *Client) {
 	h.register <- c
+	log.Println("Registering client")
 }
 
 func (h *Hub) Unregister(c *Client) {
 	h.unregister <- c
+	log.Println("Unregistering client")
 }
 
 func (h *Hub) Broadcast(msg []byte) {

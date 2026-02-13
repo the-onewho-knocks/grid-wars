@@ -1,13 +1,12 @@
 package realtime
 
 import (
-	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 
-	"github.com/gorilla/websocket"
 	"grid-war/internal/service"
+
+	"github.com/gorilla/websocket"
 )
 
 var Upgrader = websocket.Upgrader{
@@ -34,6 +33,7 @@ func (c *Client) Start() {
 	c.hub.Register(c)
 	go c.writePump()
 	go c.readPump()
+	log.Println("Client starting")
 }
 
 func (c *Client) readPump() {
@@ -42,37 +42,47 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
+	// for {
+	// 	var msg IncomingMessage
+	// 	if err := c.conn.ReadJSON(&msg); err != nil {
+	// 		break
+	// 	}
+
+	// 	if msg.Type == "capture" {
+
+	// 		tile, err := c.service.CaptureTile(
+	// 			context.Background(),
+	// 			msg.TileID,
+	// 			msg.UserID,
+	// 		)
+
+	// 		if err != nil {
+	// 			continue
+	// 		}
+
+	// 		update := TileUpdateMessage{
+	// 			Type:    "tile_update",
+	// 			TileID:  tile.ID,
+	// 			OwnerID: tile.OwnerID,
+	// 		}
+
+	// 		bytes, err := json.Marshal(update)
+	// 		if err != nil {
+	// 			log.Println("marshal error:", err)
+	// 			continue
+	// 		}
+
+	// 		c.hub.Broadcast(bytes)
+	// 	}
+	// }
+
+	log.Println("readPump started")
+
 	for {
 		var msg IncomingMessage
 		if err := c.conn.ReadJSON(&msg); err != nil {
+			log.Println("read error:", err)
 			break
-		}
-
-		if msg.Type == "capture" {
-
-			tile, err := c.service.CaptureTile(
-				context.Background(),
-				msg.TileID,
-				msg.UserID,
-			)
-
-			if err != nil {
-				continue
-			}
-
-			update := TileUpdateMessage{
-				Type:    "tile_update",
-				TileID:  tile.ID,
-				OwnerID: tile.OwnerID,
-			}
-
-			bytes, err := json.Marshal(update)
-			if err != nil {
-				log.Println("marshal error:", err)
-				continue
-			}
-
-			c.hub.Broadcast(bytes)
 		}
 	}
 }
@@ -83,4 +93,5 @@ func (c *Client) writePump() {
 			break
 		}
 	}
+	log.Println("writePump started")
 }
