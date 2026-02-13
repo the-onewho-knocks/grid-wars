@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+
 	"grid-war/internal/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,36 +18,30 @@ func NewLeaderboardService(db *pgxpool.Pool) *LeaderboardService {
 
 func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]models.LeaderboardEntry, error) {
 
+	leaders := make([]models.LeaderboardEntry, 0) // NEVER nil
+
 	rows, err := s.db.Query(ctx, `
 		SELECT u.id, u.name, u.color, COUNT(t.id) as count
-		FROM tiles t
-		JOIN users u ON t.owner_id = u.id
-		GROUP BY u.id, u.name, u.color
+		FROM users u
+		LEFT JOIN tiles t ON t.owner_id = u.id
+		GROUP BY u.id
 		ORDER BY count DESC
 	`)
 	if err != nil {
-		return nil, err
+		return leaders, err
 	}
-	
 	defer rows.Close()
 
-	var results []models.LeaderboardEntry
-
 	for rows.Next() {
-		var entry models.LeaderboardEntry
-		if err := rows.Scan(
-			&entry.UserID,
-			&entry.Name,
-			&entry.Color,
-			&entry.Count,
-		); err != nil {
-			return nil, err
+		var l models.LeaderboardEntry
+		err := rows.Scan(&l.UserID, &l.Name, &l.Color, &l.Count)
+		if err != nil {
+			return leaders, err
 		}
-
-		results = append(results, entry)
+		leaders = append(leaders, l)
 	}
 
-	return results, nil
+	return leaders, nil
 }
 
 // func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]map[string]interface{}, error) {
