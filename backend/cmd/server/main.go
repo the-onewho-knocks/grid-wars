@@ -86,39 +86,28 @@ func main() {
 
 	// CORS CONFIG (CRITICAL FIX)
 	r.Use(cors.Handler(cors.Options{
+	AllowedOrigins: []string{
+		"http://localhost:5173",
 
-		// Allow your frontend domains
-		AllowedOrigins: []string{
-			"http://localhost:5173",
-			"https://grid-wars-inboxkit.netlify.app",
+		// your NEW frontend domain
+		"https://grid-wars-inboxkit.netlify.app",
+	},
 
-			// optional wildcard for debugging:
-			// "*",
-		},
+	AllowedMethods: []string{
+		"GET",
+		"POST",
+		"OPTIONS",
+	},
 
-		AllowedMethods: []string{
-			"GET",
-			"POST",
-			"PUT",
-			"DELETE",
-			"OPTIONS",
-		},
+	AllowedHeaders: []string{
+		"Accept",
+		"Authorization",
+		"Content-Type",
+	},
 
-		AllowedHeaders: []string{
-			"Accept",
-			"Authorization",
-			"Content-Type",
-		},
-
-		ExposedHeaders: []string{
-			"Link",
-		},
-
-		AllowCredentials: false,
-
-		MaxAge: 300,
-	}))
-
+	AllowCredentials: false,
+	MaxAge: 300,
+}))
 	// -------------------------
 	// ROUTES
 	// -------------------------
