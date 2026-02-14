@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
+
 import Grid from "./components/grid";
 import Leaderboard from "./components/leaderboard";
-import { fetchTiles, fetchLeaderboard, captureTile, registerUser } from "./api/api";
 
-const BASE_URL = import.meta.env.VITE_BACKEND_URL;
+import {
+  fetchTiles,
+  fetchLeaderboard,
+  captureTile,
+  registerUser,
+} from "./api/client";
 
 export default function App() {
   const [tilesMap, setTilesMap] = useState(new Map());
   const [leaderboard, setLeaderboard] = useState([]);
   const [user, setUser] = useState(null);
+
   const [name, setName] = useState("");
   const [color, setColor] = useState("#ff0000");
+
   const [loading, setLoading] = useState(true);
 
   const userColorMap = leaderboard.reduce((acc, u) => {
@@ -27,12 +34,14 @@ export default function App() {
         ]);
 
         const map = new Map();
-        (tilesData || []).forEach((tile) => {
+
+        tilesData.forEach((tile) => {
           map.set(tile.id, tile);
         });
 
         setTilesMap(map);
-        setLeaderboard(leaderboardData || []);
+        setLeaderboard(leaderboardData);
+
       } catch (err) {
         console.error(err);
       } finally {
@@ -43,105 +52,96 @@ export default function App() {
     init();
   }, []);
 
-  const refreshLeaderboard = async () => {
-    try {
-      const data = await fetchLeaderboard();
-      setLeaderboard(data || []);
-    } catch (err) {
-      console.error("Leaderboard refresh failed");
-    }
-  };
+  async function handleRegister() {
+    const id = name.toLowerCase();
 
-  const handleRegister = async () => {
-    if (!name.trim()) {
-      alert("Enter a name");
-      return;
-    }
+    await registerUser({
+      id,
+      name,
+      color,
+    });
 
-    const id = name.trim().toLowerCase();
+    setUser({ id, name, color });
 
-    try {
-      await registerUser({ id, name, color });
-      setUser({ id, name, color });
-      refreshLeaderboard();
-    } catch (err) {
-      alert("Registration failed");
-    }
-  };
+    const lb = await fetchLeaderboard();
+    setLeaderboard(lb);
+  }
 
-  const handleTileClick = async (tileId) => {
+  async function handleTileClick(tileId) {
+
     if (!user) {
-      alert("Please register first.");
+      alert("Register first");
       return;
     }
 
     const existingTile = tilesMap.get(tileId);
 
-    if (existingTile?.ownerId) {
-      alert("⚠️ This tile is already collected!");
+    if (existingTile.ownerId) {
+      alert("Already owned");
       return;
     }
 
-    // Optimistic update
-    setTilesMap((prev) => {
-      const updated = new Map(prev);
-      updated.set(tileId, {
-        ...existingTile,
-        ownerId: user.id,
-      });
-      return updated;
+    const updated = new Map(tilesMap);
+
+    updated.set(tileId, {
+      ...existingTile,
+      ownerId: user.id,
     });
 
-    try {
-      await captureTile({ tileId, userId: user.id });
-      refreshLeaderboard();
-    } catch (err) {
-      // revert on failure
-      setTilesMap((prev) => {
-        const updated = new Map(prev);
-        updated.set(tileId, existingTile);
-        return updated;
-      });
+    setTilesMap(updated);
 
-      alert("Capture failed.");
-    }
-  };
+    await captureTile({
+      tileId,
+      userId: user.id,
+    });
 
-  if (loading) return <div className="loading">Loading...</div>;
+    const lb = await fetchLeaderboard();
+    setLeaderboard(lb);
+  }
+
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <div className="app-container">
-      <div className="top-bar">
-        {!user ? (
-          <>
-            <input
-              type="text"
-              placeholder="Enter name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-            />
-            <button onClick={handleRegister}>Join</button>
-          </>
-        ) : (
-          <div className="logged-user">
-            Playing as <span style={{ color }}>{user.name}</span>
-          </div>
-        )}
-      </div>
+    <div>
 
-      <div className="main-layout">
-        <Grid
-          tiles={[...tilesMap.values()]}
-          onTileClick={handleTileClick}
-          userColorMap={userColorMap}
-        />
-        <Leaderboard leaderboard={leaderboard} />
-      </div>
+      {!user && (
+        <div>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="name"
+          />
+
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          />
+
+          <button onClick={handleRegister}>
+            Join
+          </button>
+        </div>
+      )}
+
+      {user && (
+        <div>
+          Playing as
+          <span style={{ color: user.color }}>
+            {" "}
+            {user.name}
+          </span>
+        </div>
+      )}
+
+      <Grid
+        tiles={[...tilesMap.values()]}
+        onTileClick={handleTileClick}
+        userColorMap={userColorMap}
+      />
+
+      <Leaderboard leaderboard={leaderboard} />
+
     </div>
   );
 }

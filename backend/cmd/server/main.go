@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
-	"github.com/joho/godotenv"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 
 	"grid-war/internal/cache"
 	"grid-war/internal/config"
@@ -70,12 +70,12 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{
 			"http://localhost:5173",
-			"https://unrivaled-khapse-1c17af.netlify.app",
+			"https://serene-figolla-885c5b.netlify.app",
 		},
-		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
-		MaxAge: 300,
+		MaxAge:           300,
 	}))
 
 	r.Get("/health", handlers.HealthHandler())

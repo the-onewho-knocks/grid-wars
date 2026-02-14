@@ -4,24 +4,24 @@ if (!BASE_URL) {
   console.error("VITE_BACKEND_URL not set");
 }
 
-export async function getTiles() {
+export async function fetchTiles() {
   const res = await fetch(`${BASE_URL}/tiles`);
   if (!res.ok) throw new Error("Failed to fetch tiles");
-  const data = await res.json();
-  return data || [];
+  return res.json();
 }
 
-export async function getLeaderboard() {
+export async function fetchLeaderboard() {
   const res = await fetch(`${BASE_URL}/leaderboard`);
   if (!res.ok) throw new Error("Failed leaderboard fetch");
-  const data = await res.json();
-  return data || [];
+  return res.json();
 }
 
 export async function registerUser(payload) {
   const res = await fetch(`${BASE_URL}/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(payload),
   });
 
@@ -31,7 +31,9 @@ export async function registerUser(payload) {
 export async function captureTile(payload) {
   const res = await fetch(`${BASE_URL}/capture`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(payload),
   });
 
