@@ -25,80 +25,150 @@ import (
 
 func main() {
 
-	// Load .env
+	// Load .env (local only)
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+		log.Println("No .env file found (expected in production)")
 	}
 
 	cfg := config.Load()
 
-	// Connect Postgres
+	// -------------------------
+	// DATABASE CONNECTION
+	// -------------------------
+
 	db, err := database.NewPostgres(cfg)
 	if err != nil {
-		log.Fatal("postgres connection failed:", err)
+		log.Fatal("Postgres connection failed:", err)
 	}
 	defer db.Close()
 
-	// Run migrations
 	runMigrations(db)
 
-	// Connect Redis
+	// -------------------------
+	// REDIS CONNECTION
+	// -------------------------
+
 	rdb, err := cache.NewRedis(cfg)
 	if err != nil {
-		log.Fatal("redis connection failed:", err)
+		log.Fatal("Redis connection failed:", err)
 	}
 	defer rdb.Close()
 
-	// Repositories
+	// -------------------------
+	// REPOSITORIES
+	// -------------------------
+
 	tileRepo := repository.NewTileRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
-	// Services
+	// -------------------------
+	// SERVICES
+	// -------------------------
+
 	gameService := service.NewGameService(db, tileRepo, rdb)
 	userService := service.NewUserService(userRepo)
 	leaderboardService := service.NewLeaderboardService(db)
 
-	// Realtime hub
+	// -------------------------
+	// REALTIME HUB
+	// -------------------------
+
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	realtime.StartRedisSubscriber(context.Background(), rdb, hub)
+	go realtime.StartRedisSubscriber(context.Background(), rdb, hub)
 
-	// Router
+	// -------------------------
+	// ROUTER
+	// -------------------------
+
 	r := chi.NewRouter()
 
+	// CORS CONFIG (CRITICAL FIX)
 	r.Use(cors.Handler(cors.Options{
+
+		// Allow your frontend domains
 		AllowedOrigins: []string{
 			"http://localhost:5173",
 			"https://serene-figolla-885c5b.netlify.app",
+
+			// optional wildcard for debugging:
+			// "*",
 		},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+
+		AllowedMethods: []string{
+			"GET",
+			"POST",
+			"PUT",
+			"DELETE",
+			"OPTIONS",
+		},
+
+		AllowedHeaders: []string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+		},
+
+		ExposedHeaders: []string{
+			"Link",
+		},
+
 		AllowCredentials: false,
-		MaxAge:           300,
+
+		MaxAge: 300,
 	}))
 
+	// -------------------------
+	// ROUTES
+	// -------------------------
+
 	r.Get("/health", handlers.HealthHandler())
+
 	r.Get("/tiles", handlers.GetTilesHandler(gameService))
+
 	r.Post("/capture", handlers.CaptureTileHandler(gameService))
+
 	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
-	r.Get("/ws", handlers.WSHandler(hub, gameService))
+
 	r.Post("/register", handlers.RegisterUserHandler(userService))
 
+	r.Get("/ws", handlers.WSHandler(hub, gameService))
+
+	// -------------------------
+	// PORT CONFIG (Railway fix)
+	// -------------------------
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: r,
 	}
 
+	// -------------------------
+	// START SERVER
+	// -------------------------
+
 	go func() {
-		log.Println("Server running on port 8080")
+		log.Println("Server running on port", port)
+
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("server failed:", err)
+			log.Fatal("Server failed:", err)
 		}
 	}()
 
+	// -------------------------
+	// GRACEFUL SHUTDOWN
+	// -------------------------
+
 	quit := make(chan os.Signal, 1)
+
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	<-quit
 
 	log.Println("Shutting down server...")
@@ -107,13 +177,18 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatal("server forced to shutdown:", err)
+		log.Fatal("Server forced shutdown:", err)
 	}
 
-	log.Println("Server exited properly")
+	log.Println("Server exited cleanly")
 }
 
+// -------------------------
+// MIGRATIONS
+// -------------------------
+
 func runMigrations(db *pgxpool.Pool) {
+
 	ctx := context.Background()
 
 	_, err := db.Exec(ctx, `
@@ -139,13 +214,16 @@ func runMigrations(db *pgxpool.Pool) {
 	}
 
 	var count int
+
 	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM tiles`).Scan(&count)
 	if err != nil {
 		log.Fatal("Failed counting tiles:", err)
 	}
 
 	if count == 0 {
+
 		log.Println("Seeding 1000 tiles...")
+
 		_, err = db.Exec(ctx, `
 			INSERT INTO tiles (id)
 			SELECT generate_series(1,1000);
