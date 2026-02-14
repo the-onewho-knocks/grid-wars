@@ -90,7 +90,7 @@ func main() {
 		// Allow your frontend domains
 		AllowedOrigins: []string{
 			"http://localhost:5173",
-			"https://serene-figolla-885c5b.netlify.app",
+			"https://grid-wars-inboxkit.netlify.app",
 
 			// optional wildcard for debugging:
 			// "*",
