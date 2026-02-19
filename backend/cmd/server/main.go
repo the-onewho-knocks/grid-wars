@@ -32,9 +32,7 @@ func main() {
 
 	cfg := config.Load()
 
-	// -------------------------
 	// DATABASE CONNECTION
-	// -------------------------
 
 	db, err := database.NewPostgres(cfg)
 	if err != nil {
@@ -44,9 +42,7 @@ func main() {
 
 	runMigrations(db)
 
-	// -------------------------
 	// REDIS CONNECTION
-	// -------------------------
 
 	rdb, err := cache.NewRedis(cfg)
 	if err != nil {
@@ -54,33 +50,26 @@ func main() {
 	}
 	defer rdb.Close()
 
-	// -------------------------
 	// REPOSITORIES
-	// -------------------------
+
 
 	tileRepo := repository.NewTileRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
-	// -------------------------
 	// SERVICES
-	// -------------------------
 
 	gameService := service.NewGameService(db, tileRepo, rdb)
 	userService := service.NewUserService(userRepo)
 	leaderboardService := service.NewLeaderboardService(db)
 
-	// -------------------------
 	// REALTIME HUB
-	// -------------------------
 
 	hub := realtime.NewHub()
 	go hub.Run()
 
 	go realtime.StartRedisSubscriber(context.Background(), rdb, hub)
 
-	// -------------------------
 	// ROUTER
-	// -------------------------
 
 	r := chi.NewRouter()
 
@@ -108,9 +97,7 @@ func main() {
 	AllowCredentials: false,
 	MaxAge: 300,
 }))
-	// -------------------------
 	// ROUTES
-	// -------------------------
 
 	r.Get("/health", handlers.HealthHandler())
 
@@ -124,9 +111,7 @@ func main() {
 
 	r.Get("/ws", handlers.WSHandler(hub, gameService))
 
-	// -------------------------
 	// PORT CONFIG (Railway fix)
-	// -------------------------
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -137,10 +122,7 @@ func main() {
 		Addr:    ":" + port,
 		Handler: r,
 	}
-
-	// -------------------------
 	// START SERVER
-	// -------------------------
 
 	go func() {
 		log.Println("Server running on port", port)
@@ -150,9 +132,7 @@ func main() {
 		}
 	}()
 
-	// -------------------------
 	// GRACEFUL SHUTDOWN
-	// -------------------------
 
 	quit := make(chan os.Signal, 1)
 
@@ -172,9 +152,7 @@ func main() {
 	log.Println("Server exited cleanly")
 }
 
-// -------------------------
 // MIGRATIONS
-// -------------------------
 
 func runMigrations(db *pgxpool.Pool) {
 
