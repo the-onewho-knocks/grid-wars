@@ -46,6 +46,26 @@ func(r *tileRepo) GetAll(ctx context.Context)([]models.Tile , error){
 	return tiles , nil
 }
 
+// type Tx interface {
+//     // Standard execution methods
+//     Begin(ctx context.Context) (Tx, error)
+//     Commit(ctx context.Context) error
+//     Rollback(ctx context.Context) error
+
+//     // Query methods (same as pgx.Conn)
+//     Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+//     Query(ctx context.Context, sql string, args ...any) (Rows, error)
+//     QueryRow(ctx context.Context, sql string, args ...any) Row
+
+//     // Advanced pgx features
+//     CopyFrom(ctx context.Context, tableName Identifier, columnNames []string, rowSrc CopyFromSource) (int64, error)
+//     SendBatch(ctx context.Context, b *Batch) BatchResults
+//     LargeObjects() LargeObjects
+    
+//     // Returns the underlying connection
+//     Conn() *Conn
+// }
+
 func (r *tileRepo) Capture(
 	ctx context.Context,
 	tx pgx.Tx,
