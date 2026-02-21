@@ -1,0 +1,163 @@
+/* === GRID WAR — Global Styles === */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Core palette */
+  --bg-void:      #060608;
+  --bg-deep:      #0a0a0e;
+  --bg-panel:     #0e0e14;
+  --bg-raised:    #141420;
+  --bg-hover:     #1a1a28;
+
+  /* Borders */
+  --border-dim:   #1c1c2a;
+  --border-med:   #2a2a3a;
+  --border-bright:#3a3a50;
+
+  /* Brand colors */
+  --red:          #FF2B2B;
+  --red-dim:      #8B1A1A;
+  --orange:       #FF6B35;
+  --yellow:       #FFD400;
+  --yellow-dim:   #8B7300;
+  --green:        #00FF5A;
+  --green-dim:    #006B25;
+  --cyan:         #00E5FF;
+  --cyan-dim:     #006B7A;
+  --blue:         #2979FF;
+  --purple:       #AA00FF;
+
+  /* Text */
+  --text-bright:  #F0F0F8;
+  --text-med:     #8888AA;
+  --text-dim:     #44445A;
+
+  /* Glows */
+  --glow-red:     0 0 20px rgba(255,43,43,0.4);
+  --glow-yellow:  0 0 20px rgba(255,212,0,0.4);
+  --glow-green:   0 0 20px rgba(0,255,90,0.4);
+  --glow-cyan:    0 0 20px rgba(0,229,255,0.4);
+
+  /* Fonts */
+  --font-display: 'Bebas Neue', sans-serif;
+  --font-ui:      'Rajdhani', sans-serif;
+  --font-mono:    'Share Tech Mono', monospace;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-void);
+  color: var(--text-bright);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  cursor: crosshair;
+}
+
+button {
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+input, textarea {
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Utility */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Animations */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
+}
+
+@keyframes warline-scroll {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 200% 0%; }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeSlideRight {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes captureFlash {
+  0%   { filter: brightness(4) saturate(2); transform: scale(1.4); }
+  40%  { filter: brightness(2); transform: scale(1.2); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes gridAppear {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes notifIn {
+  from { opacity: 0; transform: translateX(30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes notifOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(30px); }
+}
+
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.92) translateY(20px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes rotateSlow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
