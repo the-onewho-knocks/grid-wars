@@ -61,6 +61,7 @@ func main() {
 		AllowedOrigins: []string{
 			"http://localhost:5173",
 			"https://grid-wars-inboxkit.netlify.app",
+			"https://grid-wars-production.up.railway.app",
 		},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
@@ -77,7 +78,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8081"
+		port = "8080"
 	}
 
 	server := &http.Server{

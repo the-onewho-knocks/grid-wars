@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const API_BASE = "http://localhost:8081";
+const API_BASE = "https://grid-wars-production.up.railway.app";
 // For local dev: const API_BASE = "http://localhost:8080";
 
 const GRID_COLS = 40;
