@@ -3,7 +3,7 @@
 Grid-Wars is a realtime distributed multiplayer system where users capture tiles on a shared global grid.  
 The system demonstrates modern backend architecture using Go, PostgreSQL, Redis, WebSockets, and a React frontend deployed independently.
 
-This project showcases distributed state synchronization, realtime messaging, clean architecture, and production deployment.
+This project showcases distributed state synchronization, clean architecture, and production deployment.
 
 ---
 
