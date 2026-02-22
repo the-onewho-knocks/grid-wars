@@ -42,42 +42,7 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
-	// for {
-	// 	var msg IncomingMessage
-	// 	if err := c.conn.ReadJSON(&msg); err != nil {
-	// 		break
-	// 	}
-
-	// 	if msg.Type == "capture" {
-
-	// 		tile, err := c.service.CaptureTile(
-	// 			context.Background(),
-	// 			msg.TileID,
-	// 			msg.UserID,
-	// 		)
-
-	// 		if err != nil {
-	// 			continue
-	// 		}
-
-	// 		update := TileUpdateMessage{
-	// 			Type:    "tile_update",
-	// 			TileID:  tile.ID,
-	// 			OwnerID: tile.OwnerID,
-	// 		}
-
-	// 		bytes, err := json.Marshal(update)
-	// 		if err != nil {
-	// 			log.Println("marshal error:", err)
-	// 			continue
-	// 		}
-
-	// 		c.hub.Broadcast(bytes)
-	// 	}
-	// }
-
 	log.Println("readPump started")
-
 	for {
 		var msg IncomingMessage
 		if err := c.conn.ReadJSON(&msg); err != nil {
@@ -93,5 +58,5 @@ func (c *Client) writePump() {
 			break
 		}
 	}
-	log.Println("writePump started")
+	log.Println("writePump done")
 }

@@ -10,13 +10,6 @@ import (
 
 func WSHandler(hub *realtime.Hub, svc *service.GameService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
-		// conn, err := realtime.Upgrader.Upgrade(w, r, nil)
-		// if err != nil {
-		// 	http.Error(w, "websocket upgrade failed", http.StatusBadRequest)
-		// 	return
-		// }
-
 		log.Println("WS hit")
 		conn, err := realtime.Upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -24,7 +17,6 @@ func WSHandler(hub *realtime.Hub, svc *service.GameService) http.HandlerFunc {
 			return
 		}
 		log.Println("Upgrade success")
-
 		client := realtime.NewClient(hub, conn, svc)
 		client.Start()
 	}

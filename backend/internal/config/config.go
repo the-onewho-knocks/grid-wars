@@ -22,12 +22,10 @@ func getEnvWithFallback(primary, fallback string) string {
 	if val != "" {
 		return val
 	}
-
 	val = os.Getenv(fallback)
 	if val != "" {
 		return val
 	}
-
 	log.Fatalf("Missing required environment variable: %s or %s", primary, fallback)
 	return ""
 }

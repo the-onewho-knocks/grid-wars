@@ -12,12 +12,9 @@ func NewRedis(cfg *config.Config) (*redis.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	client := redis.NewClient(opt)
-
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		return nil, err
 	}
-
 	return client, nil
 }

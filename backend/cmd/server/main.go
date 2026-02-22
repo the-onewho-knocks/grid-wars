@@ -24,15 +24,11 @@ import (
 )
 
 func main() {
-
-	// Load .env (local only)
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found (expected in production)")
 	}
 
 	cfg := config.Load()
-
-	// DATABASE CONNECTION
 
 	db, err := database.NewPostgres(cfg)
 	if err != nil {
@@ -42,159 +38,108 @@ func main() {
 
 	runMigrations(db)
 
-	// REDIS CONNECTION
-
 	rdb, err := cache.NewRedis(cfg)
 	if err != nil {
 		log.Fatal("Redis connection failed:", err)
 	}
 	defer rdb.Close()
 
-	// REPOSITORIES
-
-
 	tileRepo := repository.NewTileRepository(db)
 	userRepo := repository.NewUserRepository(db)
-
-	// SERVICES
 
 	gameService := service.NewGameService(db, tileRepo, rdb)
 	userService := service.NewUserService(userRepo)
 	leaderboardService := service.NewLeaderboardService(db)
 
-	// REALTIME HUB
-
 	hub := realtime.NewHub()
 	go hub.Run()
-
 	go realtime.StartRedisSubscriber(context.Background(), rdb, hub)
-
-	// ROUTER
 
 	r := chi.NewRouter()
 
-	// CORS CONFIG (CRITICAL FIX)
 	r.Use(cors.Handler(cors.Options{
-	AllowedOrigins: []string{
-		"http://localhost:5173",
-
-		// your NEW frontend domain
-		"https://grid-wars-inboxkit.netlify.app",
-	},
-
-	AllowedMethods: []string{
-		"GET",
-		"POST",
-		"OPTIONS",
-	},
-
-	AllowedHeaders: []string{
-		"Accept",
-		"Authorization",
-		"Content-Type",
-	},
-
-	AllowCredentials: false,
-	MaxAge: 300,
-}))
-	// ROUTES
+		AllowedOrigins: []string{
+			"http://localhost:5173",
+			"https://grid-wars-inboxkit.netlify.app",
+		},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	r.Get("/health", handlers.HealthHandler())
-
 	r.Get("/tiles", handlers.GetTilesHandler(gameService))
-
 	r.Post("/capture", handlers.CaptureTileHandler(gameService))
-
 	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
-
 	r.Post("/register", handlers.RegisterUserHandler(userService))
-
 	r.Get("/ws", handlers.WSHandler(hub, gameService))
-
-	// PORT CONFIG (Railway fix)
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8081"
 	}
 
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
-	// START SERVER
 
 	go func() {
 		log.Println("Server running on port", port)
-
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("Server failed:", err)
 		}
 	}()
 
-	// GRACEFUL SHUTDOWN
-
 	quit := make(chan os.Signal, 1)
-
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	<-quit
 
 	log.Println("Shutting down server...")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatal("Server forced shutdown:", err)
 	}
-
 	log.Println("Server exited cleanly")
 }
 
-// MIGRATIONS
-
 func runMigrations(db *pgxpool.Pool) {
-
 	ctx := context.Background()
 
 	_, err := db.Exec(ctx, `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		color TEXT NOT NULL
-	);
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			color TEXT NOT NULL
+		);
 	`)
 	if err != nil {
 		log.Fatal("Failed creating users table:", err)
 	}
 
 	_, err = db.Exec(ctx, `
-	CREATE TABLE IF NOT EXISTS tiles (
-		id SERIAL PRIMARY KEY,
-		owner_id TEXT,
-		updated_at TIMESTAMP DEFAULT NOW()
-	);
+		CREATE TABLE IF NOT EXISTS tiles (
+			id SERIAL PRIMARY KEY,
+			owner_id TEXT,
+			updated_at TIMESTAMP DEFAULT NOW()
+		);
 	`)
 	if err != nil {
 		log.Fatal("Failed creating tiles table:", err)
 	}
 
 	var count int
-
 	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM tiles`).Scan(&count)
 	if err != nil {
 		log.Fatal("Failed counting tiles:", err)
 	}
 
 	if count == 0 {
-
 		log.Println("Seeding 1000 tiles...")
-
-		_, err = db.Exec(ctx, `
-			INSERT INTO tiles (id)
-			SELECT generate_series(1,1000);
-		`)
+		_, err = db.Exec(ctx, `INSERT INTO tiles (id) SELECT generate_series(1,1000);`)
 		if err != nil {
 			log.Fatal("Failed seeding tiles:", err)
 		}

@@ -17,8 +17,7 @@ func NewLeaderboardService(db *pgxpool.Pool) *LeaderboardService {
 }
 
 func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]models.LeaderboardEntry, error) {
-
-	leaders := make([]models.LeaderboardEntry, 0) // NEVER nil
+	leaders := make([]models.LeaderboardEntry, 0)
 
 	rows, err := s.db.Query(ctx, `
 		SELECT u.id, u.name, u.color, COUNT(t.id) as count
@@ -34,8 +33,7 @@ func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]models.Leade
 
 	for rows.Next() {
 		var l models.LeaderboardEntry
-		err := rows.Scan(&l.UserID, &l.Name, &l.Color, &l.Count)
-		if err != nil {
+		if err := rows.Scan(&l.UserID, &l.Name, &l.Color, &l.Count); err != nil {
 			return leaders, err
 		}
 		leaders = append(leaders, l)
@@ -43,33 +41,3 @@ func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]models.Leade
 
 	return leaders, nil
 }
-
-// func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]map[string]interface{}, error) {
-
-// 	rows, err := s.db.Query(ctx, `
-// 		SELECT owner_id, COUNT(*) as count
-// 		FROM tiles
-// 		WHERE owner_id IS NOT NULL
-// 		GROUP BY owner_id
-// 		ORDER BY count DESC
-// 	`)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	var results []map[string]interface{}
-
-// 	for rows.Next() {
-// 		var ownerID string
-// 		var count int
-// 		rows.Scan(&ownerID, &count)
-
-// 		results = append(results, map[string]interface{}{
-// 			"userId": ownerID,
-// 			"count":  count,
-// 		})
-// 	}
-
-// 	return results, nil
-// }

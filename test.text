@@ -1,0 +1,967 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
+
+	"grid-war/internal/cache"
+	"grid-war/internal/config"
+	"grid-war/internal/database"
+	"grid-war/internal/handlers"
+	"grid-war/internal/realtime"
+	"grid-war/internal/repository"
+	"grid-war/internal/service"
+)
+
+func main() {
+
+	// Load .env (local only)
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found (expected in production)")
+	}
+
+	cfg := config.Load()
+
+	// DATABASE CONNECTION
+
+	db, err := database.NewPostgres(cfg)
+	if err != nil {
+		log.Fatal("Postgres connection failed:", err)
+	}
+	defer db.Close()
+
+	runMigrations(db)
+
+	// REDIS CONNECTION
+
+	rdb, err := cache.NewRedis(cfg)
+	if err != nil {
+		log.Fatal("Redis connection failed:", err)
+	}
+	defer rdb.Close()
+
+	// REPOSITORIES
+
+
+	tileRepo := repository.NewTileRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	// SERVICES
+
+	gameService := service.NewGameService(db, tileRepo, rdb)
+	userService := service.NewUserService(userRepo)
+	leaderboardService := service.NewLeaderboardService(db)
+
+	// REALTIME HUB
+
+	hub := realtime.NewHub()
+	go hub.Run()
+
+	go realtime.StartRedisSubscriber(context.Background(), rdb, hub)
+
+	// ROUTER
+
+	r := chi.NewRouter()
+
+	// CORS CONFIG (CRITICAL FIX)
+	r.Use(cors.Handler(cors.Options{
+	AllowedOrigins: []string{
+		"http://localhost:5173",
+
+		// your NEW frontend domain
+		"https://grid-wars-inboxkit.netlify.app",
+	},
+
+	AllowedMethods: []string{
+		"GET",
+		"POST",
+		"OPTIONS",
+	},
+
+	AllowedHeaders: []string{
+		"Accept",
+		"Authorization",
+		"Content-Type",
+	},
+
+	AllowCredentials: false,
+	MaxAge: 300,
+}))
+	// ROUTES
+
+	r.Get("/health", handlers.HealthHandler())
+
+	r.Get("/tiles", handlers.GetTilesHandler(gameService))
+
+	r.Post("/capture", handlers.CaptureTileHandler(gameService))
+
+	r.Get("/leaderboard", handlers.GetLeaderboardHandler(leaderboardService))
+
+	r.Post("/register", handlers.RegisterUserHandler(userService))
+
+	r.Get("/ws", handlers.WSHandler(hub, gameService))
+
+	// PORT CONFIG (Railway fix)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+	// START SERVER
+
+	go func() {
+		log.Println("Server running on port", port)
+
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal("Server failed:", err)
+		}
+	}()
+
+	// GRACEFUL SHUTDOWN
+
+	quit := make(chan os.Signal, 1)
+
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced shutdown:", err)
+	}
+
+	log.Println("Server exited cleanly")
+}
+
+// MIGRATIONS
+
+func runMigrations(db *pgxpool.Pool) {
+
+	ctx := context.Background()
+
+	_, err := db.Exec(ctx, `
+	CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		color TEXT NOT NULL
+	);
+	`)
+	if err != nil {
+		log.Fatal("Failed creating users table:", err)
+	}
+
+	_, err = db.Exec(ctx, `
+	CREATE TABLE IF NOT EXISTS tiles (
+		id SERIAL PRIMARY KEY,
+		owner_id TEXT,
+		updated_at TIMESTAMP DEFAULT NOW()
+	);
+	`)
+	if err != nil {
+		log.Fatal("Failed creating tiles table:", err)
+	}
+
+	var count int
+
+	err = db.QueryRow(ctx, `SELECT COUNT(*) FROM tiles`).Scan(&count)
+	if err != nil {
+		log.Fatal("Failed counting tiles:", err)
+	}
+
+	if count == 0 {
+
+		log.Println("Seeding 1000 tiles...")
+
+		_, err = db.Exec(ctx, `
+			INSERT INTO tiles (id)
+			SELECT generate_series(1,1000);
+		`)
+		if err != nil {
+			log.Fatal("Failed seeding tiles:", err)
+		}
+	}
+}
+
+package cache
+
+import (
+	"context"
+
+	"github.com/redis/go-redis/v9"
+	"grid-war/internal/config"
+)
+
+func NewRedis(cfg *config.Config) (*redis.Client, error) {
+	opt, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return nil, err
+	}
+
+	client := redis.NewClient(opt)
+
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+package config
+
+import (
+	"log"
+	"os"
+)
+
+type Config struct {
+	PostgresURL string
+	RedisURL    string
+}
+
+func Load() *Config {
+	return &Config{
+		PostgresURL: getEnvWithFallback("POSTGRES_URL", "DATABASE_URL"),
+		RedisURL:    mustGetEnv("REDIS_URL"),
+	}
+}
+
+func getEnvWithFallback(primary, fallback string) string {
+	val := os.Getenv(primary)
+	if val != "" {
+		return val
+	}
+
+	val = os.Getenv(fallback)
+	if val != "" {
+		return val
+	}
+
+	log.Fatalf("Missing required environment variable: %s or %s", primary, fallback)
+	return ""
+}
+
+func mustGetEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("Missing required environment variable: %s", key)
+	}
+	return val
+}
+
+package database
+
+import (
+	"context"
+	"grid-war/internal/config"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func NewPostgres(cfg *config.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), cfg.PostgresURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pool.Ping(context.Background()); err != nil {
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"grid-war/internal/models"
+	"grid-war/internal/service"
+)
+
+type CaptureRequest struct {
+	TileID int    `json:"tileId"`
+	UserID string `json:"userId"`
+}
+
+// func GetTilesHandler(svc *service.GameService) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		tiles, err := svc.GetAllTiles(r.Context())
+// 		if err != nil {
+// 			http.Error(w, "failed", 500)
+// 			return
+// 		}
+// 		json.NewEncoder(w).Encode(tiles)
+// 	}
+// }
+
+func GetTilesHandler(svc *service.GameService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		tiles, err := svc.GetAllTiles(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if tiles == nil {
+			tiles = make([]models.Tile, 0)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(tiles)
+	}
+}
+
+func GetLeaderboardHandler(svc *service.LeaderboardService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := svc.GetLeaderboard(r.Context())
+		if err != nil {
+			http.Error(w, "failed", 500)
+			return
+		}
+		json.NewEncoder(w).Encode(data)
+	}
+}
+
+func CaptureTileHandler(svc *service.GameService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var req CaptureRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		tile, err := svc.CaptureTile(r.Context(), req.TileID, req.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
+		json.NewEncoder(w).Encode(tile)
+	}
+}
+
+package handlers
+
+import "net/http"
+
+func HealthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+}
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"grid-war/internal/models"
+	"grid-war/internal/service"
+)
+
+type RegisterUserRequest struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+func RegisterUserHandler(svc *service.UserService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var req RegisterUserRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		user := models.User{
+			ID:    req.ID,
+			Name:  req.Name,
+			Color: req.Color,
+		}
+
+		if err := svc.Register(r.Context(), user); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+	}
+}
+
+package handlers
+
+import (
+	"log"
+	"net/http"
+
+	"grid-war/internal/realtime"
+	"grid-war/internal/service"
+)
+
+func WSHandler(hub *realtime.Hub, svc *service.GameService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		// conn, err := realtime.Upgrader.Upgrade(w, r, nil)
+		// if err != nil {
+		// 	http.Error(w, "websocket upgrade failed", http.StatusBadRequest)
+		// 	return
+		// }
+
+		log.Println("WS hit")
+		conn, err := realtime.Upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println("Upgrade failed:", err)
+			return
+		}
+		log.Println("Upgrade success")
+
+		client := realtime.NewClient(hub, conn, svc)
+		client.Start()
+	}
+}
+
+package models
+
+type LeaderboardEntry struct {
+	UserID string `json:"userId"`
+	Name   string `json:"name,omitempty"`
+	Color  string `json:"color,omitempty"`
+	Count  int    `json:"count"`
+}
+
+package models
+
+import "time"
+
+type Tile struct {
+	ID        int       `json:"id"`
+	OwnerID   *string   `json:"ownerId"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+package models
+
+type User struct {
+	ID    string
+	Name  string
+	Color string
+}
+package realtime
+
+import (
+	"log"
+	"net/http"
+
+	"grid-war/internal/service"
+
+	"github.com/gorilla/websocket"
+)
+
+var Upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+type Client struct {
+	hub     *Hub
+	conn    *websocket.Conn
+	send    chan []byte
+	service *service.GameService
+}
+
+func NewClient(hub *Hub, conn *websocket.Conn, svc *service.GameService) *Client {
+	return &Client{
+		hub:     hub,
+		conn:    conn,
+		send:    make(chan []byte, 256),
+		service: svc,
+	}
+}
+
+func (c *Client) Start() {
+	c.hub.Register(c)
+	go c.writePump()
+	go c.readPump()
+	log.Println("Client starting")
+}
+
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.Unregister(c)
+		c.conn.Close()
+	}()
+
+	// for {
+	// 	var msg IncomingMessage
+	// 	if err := c.conn.ReadJSON(&msg); err != nil {
+	// 		break
+	// 	}
+
+	// 	if msg.Type == "capture" {
+
+	// 		tile, err := c.service.CaptureTile(
+	// 			context.Background(),
+	// 			msg.TileID,
+	// 			msg.UserID,
+	// 		)
+
+	// 		if err != nil {
+	// 			continue
+	// 		}
+
+	// 		update := TileUpdateMessage{
+	// 			Type:    "tile_update",
+	// 			TileID:  tile.ID,
+	// 			OwnerID: tile.OwnerID,
+	// 		}
+
+	// 		bytes, err := json.Marshal(update)
+	// 		if err != nil {
+	// 			log.Println("marshal error:", err)
+	// 			continue
+	// 		}
+
+	// 		c.hub.Broadcast(bytes)
+	// 	}
+	// }
+
+	log.Println("readPump started")
+
+	for {
+		var msg IncomingMessage
+		if err := c.conn.ReadJSON(&msg); err != nil {
+			log.Println("read error:", err)
+			break
+		}
+	}
+}
+
+func (c *Client) writePump() {
+	for msg := range c.send {
+		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			break
+		}
+	}
+	log.Println("writePump started")
+}
+package realtime
+
+import "log"
+
+type Hub struct {
+	clients    map[*Client]bool
+	register   chan *Client
+	unregister chan *Client
+	broadcast  chan []byte
+}
+
+func NewHub() *Hub {
+	return &Hub{
+		clients:    make(map[*Client]bool),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		broadcast:  make(chan []byte),
+	}
+}
+
+func (h *Hub) Run() {
+	for {
+		select {
+
+		case client := <-h.register:
+			h.clients[client] = true
+
+		case client := <-h.unregister:
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
+			}
+
+		case message := <-h.broadcast:
+			for client := range h.clients {
+				select {
+				case client.send <- message:
+				default:
+					close(client.send)
+					delete(h.clients, client)
+				}
+			}
+		}
+	}
+}
+
+func (h *Hub) Register(c *Client) {
+	h.register <- c
+	log.Println("Registering client")
+}
+
+func (h *Hub) Unregister(c *Client) {
+	h.unregister <- c
+	log.Println("Unregistering client")
+}
+
+func (h *Hub) Broadcast(msg []byte) {
+	h.broadcast <- msg
+}
+package realtime
+
+type IncomingMessage struct {
+	Type   string `json:"type"`
+	TileID int    `json:"tileId,omitempty"`
+	UserID string `json:"userId,omitempty"`
+}
+
+type TileUpdateMessage struct {
+	Type    string  `json:"type"`
+	TileID  int     `json:"tileId"`
+	OwnerID *string `json:"ownerId"`
+}
+package realtime
+
+import (
+	"context"
+
+	"github.com/redis/go-redis/v9"
+)
+
+func StartRedisSubscriber(ctx context.Context, rdb *redis.Client, hub *Hub) {
+	pubsub := rdb.Subscribe(ctx, "tile_updates")
+	ch := pubsub.Channel()
+
+	go func() {
+		for msg := range ch {
+			hub.broadcast <- []byte(msg.Payload)
+		}
+	}()
+}
+
+package repository
+
+import (
+	"context"
+	"errors"
+
+	"grid-war/internal/models"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type TileRepository interface {
+	GetAll(ctx context.Context) ([]models.Tile, error)
+	Capture(ctx context.Context, tx pgx.Tx, tileID int, userID string) (*models.Tile, error)
+}
+
+type tileRepo struct{
+	db *pgxpool.Pool
+}
+
+func NewTileRepository(db *pgxpool.Pool) TileRepository{
+	return &tileRepo{db:db}
+}
+
+func(r *tileRepo) GetAll(ctx context.Context)([]models.Tile , error){
+	rows , err := r.db.Query(ctx , `
+		select id , owner_id , updated_at from tiles
+	`)
+	if err != nil{
+		return nil , err
+	}
+
+	defer rows.Close()
+
+	var tiles []models.Tile
+
+	for rows.Next(){
+		var t models.Tile
+		if err := rows.Scan(&t.ID , &t.OwnerID , &t.UpdatedAt);err!= nil {
+			return nil , err
+		}
+		tiles = append(tiles, t)
+	}
+
+	return tiles , nil
+}
+
+// type Tx interface {
+//     // Standard execution methods
+//     Begin(ctx context.Context) (Tx, error)
+//     Commit(ctx context.Context) error
+//     Rollback(ctx context.Context) error
+
+//     // Query methods (same as pgx.Conn)
+//     Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+//     Query(ctx context.Context, sql string, args ...any) (Rows, error)
+//     QueryRow(ctx context.Context, sql string, args ...any) Row
+
+//     // Advanced pgx features
+//     CopyFrom(ctx context.Context, tableName Identifier, columnNames []string, rowSrc CopyFromSource) (int64, error)
+//     SendBatch(ctx context.Context, b *Batch) BatchResults
+//     LargeObjects() LargeObjects
+    
+//     // Returns the underlying connection
+//     Conn() *Conn
+// }
+
+func (r *tileRepo) Capture(
+	ctx context.Context,
+	tx pgx.Tx,
+	tileID int,
+	userID string,
+) (*models.Tile, error) {
+
+	var tile models.Tile
+
+	err := tx.QueryRow(ctx, `
+		select id, owner_id, updated_at
+		from tiles
+		where id = $1
+		for update
+	`, tileID).Scan(&tile.ID, &tile.OwnerID, &tile.UpdatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if tile.OwnerID != nil {
+		return nil, errors.New("tile already claimed")
+	}
+
+	_, err = tx.Exec(ctx, `
+		update tiles
+		set owner_id = $1, updated_at = now()
+		where id = $2
+	`, userID, tileID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	tile.OwnerID = &userID
+
+	return &tile, nil
+}
+package repository
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"grid-war/internal/models"
+)
+
+type UserRepository interface {
+	Create(ctx context.Context, user models.User) error
+	GetByID(ctx context.Context, id string) (*models.User, error)
+}
+
+type userRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewUserRepository(db *pgxpool.Pool) UserRepository {
+	return &userRepo{db: db}
+}
+
+func (r *userRepo) Create(ctx context.Context, user models.User) error {
+	_, err := r.db.Exec(ctx,
+		`INSERT INTO users (id, name, color) VALUES ($1, $2, $3)`,
+		user.ID, user.Name, user.Color,
+	)
+	return err
+}
+
+func (r *userRepo) GetByID(ctx context.Context, id string) (*models.User, error) {
+	var user models.User
+	err := r.db.QueryRow(ctx,
+		`SELECT id, name, color FROM users WHERE id = $1`,
+		id,
+	).Scan(&user.ID, &user.Name, &user.Color)
+
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+package service
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
+	"grid-war/internal/models"
+	"grid-war/internal/repository"
+)
+
+type GameService struct {
+	db    *pgxpool.Pool
+	tiles repository.TileRepository
+	rdb   *redis.Client
+}
+
+func NewGameService(db *pgxpool.Pool, tiles repository.TileRepository, rdb *redis.Client) *GameService {
+	return &GameService{
+		db:    db,
+		tiles: tiles,
+		rdb:   rdb,
+	}
+}
+
+//logic for capturing tile
+
+func (s *GameService) CaptureTile(ctx context.Context,
+tileID int , userID string)(*models.Tile , error){
+
+	tx , err := s.db.Begin(ctx)
+	if err != nil {
+		return nil , err
+	}
+
+	defer tx.Rollback(ctx)
+
+	tile , err := s.tiles.Capture(ctx , tx , tileID , userID)
+	if err != nil {
+		return nil , err
+	}
+
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	// Publish Redis event
+	payload, _ := json.Marshal(tile)
+	s.rdb.Publish(ctx, "tile_updates", payload)
+
+	return tile, nil
+}
+
+func (s *GameService) GetAllTiles(ctx context.Context) ([]models.Tile, error) {
+	return s.tiles.GetAll(ctx)
+}
+
+package service
+
+import (
+	"context"
+
+	"grid-war/internal/models"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type LeaderboardService struct {
+	db *pgxpool.Pool
+}
+
+func NewLeaderboardService(db *pgxpool.Pool) *LeaderboardService {
+	return &LeaderboardService{db: db}
+}
+
+func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]models.LeaderboardEntry, error) {
+
+	leaders := make([]models.LeaderboardEntry, 0) // NEVER nil
+
+	rows, err := s.db.Query(ctx, `
+		SELECT u.id, u.name, u.color, COUNT(t.id) as count
+		FROM users u
+		LEFT JOIN tiles t ON t.owner_id = u.id
+		GROUP BY u.id
+		ORDER BY count DESC
+	`)
+	if err != nil {
+		return leaders, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var l models.LeaderboardEntry
+		err := rows.Scan(&l.UserID, &l.Name, &l.Color, &l.Count)
+		if err != nil {
+			return leaders, err
+		}
+		leaders = append(leaders, l)
+	}
+
+	return leaders, nil
+}
+
+// func (s *LeaderboardService) GetLeaderboard(ctx context.Context) ([]map[string]interface{}, error) {
+
+// 	rows, err := s.db.Query(ctx, `
+// 		SELECT owner_id, COUNT(*) as count
+// 		FROM tiles
+// 		WHERE owner_id IS NOT NULL
+// 		GROUP BY owner_id
+// 		ORDER BY count DESC
+// 	`)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer rows.Close()
+
+// 	var results []map[string]interface{}
+
+// 	for rows.Next() {
+// 		var ownerID string
+// 		var count int
+// 		rows.Scan(&ownerID, &count)
+
+// 		results = append(results, map[string]interface{}{
+// 			"userId": ownerID,
+// 			"count":  count,
+// 		})
+// 	}
+
+// 	return results, nil
+// }
+package service
+
+import (
+	"context"
+
+	"grid-war/internal/models"
+	"grid-war/internal/repository"
+)
+
+type UserService struct {
+	repo repository.UserRepository
+}
+
+func NewUserService(repo repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+func (s *UserService) Register(ctx context.Context, user models.User) error {
+	return s.repo.Create(ctx, user)
+}

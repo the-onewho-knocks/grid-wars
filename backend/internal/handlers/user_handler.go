@@ -16,9 +16,7 @@ type RegisterUserRequest struct {
 
 func RegisterUserHandler(svc *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
 		var req RegisterUserRequest
-
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return

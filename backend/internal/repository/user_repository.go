@@ -22,7 +22,7 @@ func NewUserRepository(db *pgxpool.Pool) UserRepository {
 
 func (r *userRepo) Create(ctx context.Context, user models.User) error {
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO users (id, name, color) VALUES ($1, $2, $3)`,
+		`INSERT INTO users (id, name, color) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
 		user.ID, user.Name, user.Color,
 	)
 	return err
@@ -31,10 +31,8 @@ func (r *userRepo) Create(ctx context.Context, user models.User) error {
 func (r *userRepo) GetByID(ctx context.Context, id string) (*models.User, error) {
 	var user models.User
 	err := r.db.QueryRow(ctx,
-		`SELECT id, name, color FROM users WHERE id = $1`,
-		id,
+		`SELECT id, name, color FROM users WHERE id = $1`, id,
 	).Scan(&user.ID, &user.Name, &user.Color)
-
 	if err != nil {
 		return nil, err
 	}
