@@ -746,7 +746,7 @@ export default function GridWars() {
         <div style={{fontSize:8,letterSpacing:2,color:"var(--muted)",marginBottom:6}}>HOW TO PLAY</div>
         <div style={{fontSize:10,color:"var(--muted)",lineHeight:1.9}}>
           <div>→ Tap any free tile to capture it</div>
-          <div>→ <span style={{color:"var(--accent2)"}}>5s cooldown</span> between captures</div>
+          <div>→ <span style={{color:"var(--accent2)"}}>3s cooldown</span> between captures</div>
           <div>→ Fill all 1000 tiles to end the round</div>
           <div>→ Most tiles = <span style={{color:"var(--gold)"}}>WIN</span></div>
           <div>→ Grid resets automatically</div>
