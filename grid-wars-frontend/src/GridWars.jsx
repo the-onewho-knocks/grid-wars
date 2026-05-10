@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const API_BASE = "https://grid-wars-production.up.railway.app";
-// For local dev: const API_BASE = "http://localhost:8080";
 
 const GRID_COLS = 40;
 const GRID_ROWS = 25;
@@ -62,7 +61,6 @@ const styles = `
     pointer-events: none; z-index: 1000;
   }
 
-  /* ════════════ DESKTOP (>=768px) ════════════ */
   .app {
     display: grid;
     grid-template-rows: var(--header-h) 1fr 32px;
@@ -364,7 +362,6 @@ const styles = `
   .reset-fill     { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width 1s linear; }
   .reset-num      { font-family: 'Orbitron', sans-serif; font-size: 16px; font-weight: 900; color: var(--accent); min-width: 24px; text-align: right; }
 
-  /* ════════════ MOBILE (<768px) ════════════ */
   @media (max-width: 767px) {
     body { overflow: hidden; }
     .app { display: flex; flex-direction: column; height: 100dvh; }
@@ -470,17 +467,25 @@ function CooldownRing({ remaining, total, size = 30 }) {
   );
 }
 
+// FIX #1: resetIn is captured at mount time; countdown resets correctly when gameOver changes
 function GameOverOverlay({ gameOver, me, resetIn }) {
   const [countdown, setCountdown] = useState(resetIn);
+
   useEffect(() => {
     setCountdown(resetIn);
-    const iv = setInterval(() => setCountdown(c => Math.max(0, c - 1)), 1000);
+    if (resetIn <= 0) return;
+    const iv = setInterval(() => setCountdown(c => {
+      if (c <= 1) { clearInterval(iv); return 0; }
+      return c - 1;
+    }), 1000);
     return () => clearInterval(iv);
-  }, [resetIn, gameOver]);
+  }, [resetIn, gameOver]); // re-run when gameOver object changes (new round)
 
   if (!gameOver) return null;
   const { winner, rankings } = gameOver;
-  const myRank = rankings.findIndex(r => r.userId === me?.id);
+
+  // FIX #2: rankings from game_over use userId, me.id is the local genId() value — match correctly
+  const myRankIndex = me ? rankings.findIndex(r => r.userId === me.id) : -1;
   const isWinner = me && winner.userId === me.id;
   const medals = ["🥇","🥈","🥉"];
 
@@ -500,10 +505,10 @@ function GameOverOverlay({ gameOver, me, resetIn }) {
             <div className="winner-pct">{((winner.count/TOTAL_TILES)*100).toFixed(1)}%</div>
           </div>
         </div>
-        {me && (
+        {me && myRankIndex >= 0 && (
           <div className={`my-result ${isWinner?"won":"lost"}`}>
             {isWinner ? "⚡ YOU WIN! TERRITORY DOMINATED ⚡"
-              : `YOUR RANK: #${myRank+1} — ${rankings[myRank]?.count||0} TILES`}
+              : `YOUR RANK: #${myRankIndex+1} — ${rankings[myRankIndex]?.count||0} TILES`}
           </div>
         )}
         <div className="rankings-list">
@@ -512,7 +517,10 @@ function GameOverOverlay({ gameOver, me, resetIn }) {
               <div className="rank-fill" style={{width:`${(entry.count/(rankings[0]?.count||1))*100}%`,background:entry.color}} />
               {medals[i] ? <div className="rank-medal">{medals[i]}</div> : <div className="rank-num">#{i+1}</div>}
               <div className="rank-dot" style={{background:entry.color}} />
-              <div className="rank-name" style={{color:i===0?"var(--gold)":i===1?"var(--silver)":i===2?"var(--bronze)":"var(--text)",fontWeight:entry.userId===me?.id?"bold":"normal"}}>
+              <div className="rank-name" style={{
+                color: i===0?"var(--gold)":i===1?"var(--silver)":i===2?"var(--bronze)":"var(--text)",
+                fontWeight: entry.userId===me?.id?"bold":"normal"
+              }}>
                 {entry.name}{entry.userId===me?.id?" (YOU)":""}
               </div>
               <div className="rank-count" style={{color:i===0?"var(--gold)":i===1?"var(--silver)":i===2?"var(--bronze)":"var(--accent)"}}>
@@ -525,7 +533,7 @@ function GameOverOverlay({ gameOver, me, resetIn }) {
         <div className="reset-bar">
           <div className="reset-label">NEW GAME IN</div>
           <div className="reset-progress">
-            <div className="reset-fill" style={{width:`${(countdown/resetIn)*100}%`}} />
+            <div className="reset-fill" style={{width:`${resetIn > 0 ? (countdown/resetIn)*100 : 0}%`}} />
           </div>
           <div className="reset-num">{countdown}s</div>
         </div>
@@ -540,7 +548,9 @@ const RankIcon  = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const FeedIcon  = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
 
 export default function GridWars() {
-  const [tiles, setTiles] = useState([]);
+  // FIX #3: Store tiles as a Map (id -> ownerId) instead of an array
+  // This makes tile lookups O(1) instead of O(n) per tile per render
+  const [tileOwners, setTileOwners] = useState(() => new Map());
   const [leaderboard, setLeaderboard] = useState([]);
   const [me, setMe] = useState(null);
   const [wsStatus, setWsStatus] = useState("disconnected");
@@ -553,8 +563,10 @@ export default function GridWars() {
   const [activeTab, setActiveTab] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const cooldownRef = useRef(null);
-  const ws = useRef(null);
+  const wsRef = useRef(null);
+  const toastRef = useRef(null);
   const { toasts, add: toast } = useToast();
+  toastRef.current = toast; // FIX #4: keep toast ref fresh to avoid stale closure in WS handler
   const [formName, setFormName] = useState("");
   const [formColor, setFormColor] = useState(PRESET_COLORS[0]);
 
@@ -579,8 +591,10 @@ export default function GridWars() {
   const loadTiles = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/tiles`);
-      setTiles((await r.json()) || []);
-    } catch { toast("Failed to load tiles", "error"); }
+      const arr = (await r.json()) || [];
+      // FIX #3 continued: convert array to Map on load
+      setTileOwners(new Map(arr.map(t => [t.id, t.ownerId ?? null])));
+    } catch { toastRef.current("Failed to load tiles", "error"); }
   }, []);
 
   const loadLeaderboard = useCallback(async () => {
@@ -593,50 +607,106 @@ export default function GridWars() {
   useEffect(() => {
     loadTiles();
     loadLeaderboard();
+    // FIX #5: Poll leaderboard every 8s, but NOT on every tile_update WebSocket message.
+    // The WS message only triggers a leaderboard refresh when needed (game_over / new_game).
     const iv = setInterval(loadLeaderboard, 8000);
     return () => clearInterval(iv);
   }, []);
 
-  const connectWS = useCallback(() => {
-    const sock = new WebSocket(API_BASE.replace(/^http/, "ws") + "/ws");
-    ws.current = sock;
-    sock.onopen  = () => { setWsStatus("connected"); toast("Live connection established", "success"); };
-    sock.onclose = () => { setWsStatus("disconnected"); setTimeout(connectWS, 3000); };
-    sock.onerror = () => setWsStatus("disconnected");
-    sock.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "tile_update") {
-          setTiles(prev => prev.map(t => t.id === msg.id ? { ...t, ownerId: msg.ownerId } : t));
-          setFlashTiles(f => new Set([...f, msg.id]));
-          setTimeout(() => setFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 500);
-          setEvents(prev => [{
-            id: Date.now()+Math.random(), tileId: msg.id, ownerId: msg.ownerId,
-            time: new Date().toLocaleTimeString("en", { hour12: false }),
-          }, ...prev.slice(0, 49)]);
-          loadLeaderboard();
-        }
-        if (msg.type === "game_over") {
-          setGameOver({ winner: msg.winner, rankings: msg.rankings, resetIn: msg.resetIn });
-          toast("🏆 GAME OVER! All tiles captured!", "info");
-        }
-        if (msg.type === "new_game") {
-          setGameOver(null);
-          setTiles(prev => prev.map(t => ({ ...t, ownerId: null })));
-          setEvents([]);
-          setCooldownRemaining(0);
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          toast("🚀 NEW GAME STARTED!", "success");
-          loadTiles(); loadLeaderboard();
-        }
-      } catch {}
-    };
-  }, []);
+  // FIX #6: Build a stable userColorMap from leaderboard + me so tile rendering
+  // doesn't need to call leaderboard.find() (O(n)) for every tile on every render.
+  const userColorMap = useMemo(() => {
+    const map = new Map(leaderboard.map(e => [e.userId, e.color]));
+    if (me) map.set(me.id, me.color); // always include self even if not in leaderboard yet
+    return map;
+  }, [leaderboard, me]);
 
   useEffect(() => {
-    connectWS();
-    return () => { ws.current?.close(); if (cooldownRef.current) clearInterval(cooldownRef.current); };
-  }, []);
+    let reconnectTimer = null;
+
+    function connect() {
+      const sock = new WebSocket(API_BASE.replace(/^http/, "ws") + "/ws");
+      wsRef.current = sock;
+
+    sock.onopen = () => {
+      setWsStatus("connected");
+      toastRef.current("Live connection established", "success");
+      // Sync state in case we missed a new_game event while disconnected
+      loadTiles();
+      loadLeaderboard();
+    };
+
+      sock.onclose = () => {
+        setWsStatus("disconnected");
+        // FIX #7: Use ref-based reconnect so we always call the latest connect()
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+
+      sock.onerror = () => setWsStatus("disconnected");
+
+      sock.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+
+          if (msg.type === "tile_update") {
+            // FIX #3 continued: update Map entry directly, no array scan
+            setTileOwners(prev => {
+              const next = new Map(prev);
+              next.set(msg.id, msg.ownerId ?? null);
+              return next;
+            });
+            setFlashTiles(f => new Set([...f, msg.id]));
+            setTimeout(() => setFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 500);
+            setEvents(prev => [{
+              id: Date.now() + Math.random(), tileId: msg.id, ownerId: msg.ownerId,
+              time: new Date().toLocaleTimeString("en", { hour12: false }),
+            }, ...prev.slice(0, 49)]);
+            // FIX #5: Don't call loadLeaderboard() here — it fires on every capture and
+            // hammers the server during a full game. The 8s poll is sufficient.
+          }
+
+          if (msg.type === "game_over") {
+            // FIX #8: Immediately update leaderboard from game_over payload so
+            // userColorMap is correct when the overlay renders, without waiting for a poll.
+            if (msg.rankings?.length) {
+              setLeaderboard(msg.rankings.map(r => ({
+                userId: r.userId,
+                name: r.name,
+                color: r.color,
+                count: r.count,
+              })));
+            }
+            setGameOver({ winner: msg.winner, rankings: msg.rankings, resetIn: msg.resetIn });
+            toastRef.current("🏆 GAME OVER! All tiles captured!", "info");
+          }
+
+          if (msg.type === "new_game") {
+            setGameOver(null);
+            // FIX #9: Reset tile owners Map instead of mapping over old array
+            setTileOwners(prev => {
+              const next = new Map();
+              for (const [id] of prev) next.set(id, null);
+              return next;
+            });
+            setEvents([]);
+            setCooldownRemaining(0);
+            if (cooldownRef.current) clearInterval(cooldownRef.current);
+            toastRef.current("🚀 NEW GAME STARTED!", "success");
+            // Reload tiles to ensure DB state matches (handles any missed updates)
+            loadTiles();
+            loadLeaderboard();
+          }
+        } catch {}
+      };
+    }
+
+    connect();
+    return () => {
+      wsRef.current?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []); // runs once
 
   const handleRegister = async () => {
     if (!formName.trim()) return toast("Name required", "error");
@@ -650,6 +720,7 @@ export default function GridWars() {
       setMe({ id: userId, name: formName.trim(), color: formColor });
       setShowRegister(false);
       toast(`Welcome, ${formName.trim()}!`, "success");
+      loadLeaderboard(); // refresh so our entry appears
     } catch (err) { toast(err.message, "error"); }
   };
 
@@ -675,15 +746,26 @@ export default function GridWars() {
       }
       if (!r.ok) { toast(await r.text() || "Already claimed", "error"); return; }
       const tile = await r.json();
-      setTiles(prev => prev.map(t => t.id === tile.id ? { ...t, ownerId: tile.ownerId } : t));
+      // Update our local Map optimistically (WS will also come in, idempotent)
+      setTileOwners(prev => { const next = new Map(prev); next.set(tile.id, tile.ownerId); return next; });
       startCooldown();
       toast(`Tile #${tile.id} captured! ✓`, "success");
     } catch { toast("Capture failed", "error"); }
   };
 
-  const myTiles   = tiles.filter(t => t.ownerId === me?.id);
-  const captured  = tiles.filter(t => t.ownerId != null);
-  const progress  = (captured.length / TOTAL_TILES) * 100;
+  // FIX #3 continued: derive stats from Map, O(n) single pass
+  const { myTileCount, capturedCount } = useMemo(() => {
+    let myTileCount = 0, capturedCount = 0;
+    for (const [, ownerId] of tileOwners) {
+      if (ownerId != null) {
+        capturedCount++;
+        if (me && ownerId === me.id) myTileCount++;
+      }
+    }
+    return { myTileCount, capturedCount };
+  }, [tileOwners, me]);
+
+  const progress  = (capturedCount / TOTAL_TILES) * 100;
   const maxCount  = leaderboard[0]?.count || 1;
   const isReady   = cooldownRemaining <= 0;
   const myRankNum = me ? leaderboard.findIndex(l => l.userId === me.id) + 1 : 0;
@@ -715,16 +797,16 @@ export default function GridWars() {
             <div style={{fontSize:9,color:"var(--muted)",letterSpacing:1,marginBottom:2}}>{me.id.slice(0,10)}...</div>
             <div className="player-stats">
               <div className="stat">
-                <div className="stat-value" style={{color:me.color}}>{myTiles.length}</div>
+                <div className="stat-value" style={{color:me.color}}>{myTileCount}</div>
                 <div className="stat-label">TILES</div>
               </div>
               <div className="stat">
-                <div className="stat-value">{((myTiles.length/TOTAL_TILES)*100).toFixed(1)}%</div>
+                <div className="stat-value">{((myTileCount/TOTAL_TILES)*100).toFixed(1)}%</div>
                 <div className="stat-label">CONTROL</div>
               </div>
             </div>
             <div className="progress-bar" style={{marginTop:8}}>
-              <div className="progress-fill" style={{width:`${(myTiles.length/TOTAL_TILES)*100}%`,background:`linear-gradient(90deg,${me.color},${darken(me.color,-30)})`}} />
+              <div className="progress-fill" style={{width:`${(myTileCount/TOTAL_TILES)*100}%`,background:`linear-gradient(90deg,${me.color},${darken(me.color,-30)})`}} />
             </div>
           </div>
           <button className="btn danger" style={{marginBottom:16}} onClick={()=>{setMe(null);setShowRegister(true);}}>
@@ -740,7 +822,7 @@ export default function GridWars() {
       </div>
       <div className="progress-bar"><div className="progress-fill" style={{width:`${progress}%`}} /></div>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"var(--muted)",letterSpacing:1,marginTop:5}}>
-        <span>{captured.length} CLAIMED</span><span>{TOTAL_TILES-captured.length} FREE</span>
+        <span>{capturedCount} CLAIMED</span><span>{TOTAL_TILES-capturedCount} FREE</span>
       </div>
       <div style={{marginTop:14,padding:10,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:3}}>
         <div style={{fontSize:8,letterSpacing:2,color:"var(--muted)",marginBottom:6}}>HOW TO PLAY</div>
@@ -782,12 +864,14 @@ export default function GridWars() {
       {events.length === 0
         ? <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",padding:"24px 0"}}>Awaiting activity...</div>
         : events.map(ev => {
+          // FIX #6 continued: O(1) color lookup from Map
+          const color = userColorMap.get(ev.ownerId) || "var(--accent)";
           const lb = leaderboard.find(l => l.userId === ev.ownerId);
           return (
             <div key={ev.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"var(--muted)",padding:"7px 0",borderBottom:"1px solid rgba(26,37,53,0.5)"}}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:lb?.color||"var(--accent)",flexShrink:0}} />
+              <div style={{width:6,height:6,borderRadius:"50%",background:color,flexShrink:0}} />
               <span style={{flex:1}}>
-                <span style={{color:lb?.color||"var(--accent)"}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
+                <span style={{color}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
                 {" "}captured <span style={{color:"var(--text)"}}>#{ev.tileId}</span>
               </span>
               <span style={{flexShrink:0,fontSize:9}}>{ev.time}</span>
@@ -848,7 +932,7 @@ export default function GridWars() {
             )}
             {!isMobile && (
               <span style={{fontSize:10,color:"var(--muted)",letterSpacing:1}}>
-                {captured.length}/{TOTAL_TILES} TILES
+                {capturedCount}/{TOTAL_TILES} TILES
               </span>
             )}
           </div>
@@ -864,7 +948,7 @@ export default function GridWars() {
           <div className="mobile-cooldown-strip">
             <span className="mcs-label">TILES</span>
             <span className="mcs-val" style={{color:"var(--accent)"}}>
-              {captured.length}<span style={{fontSize:9,color:"var(--muted)"}}>/{TOTAL_TILES}</span>
+              {capturedCount}<span style={{fontSize:9,color:"var(--muted)"}}>/{TOTAL_TILES}</span>
             </span>
             <div className="mcs-bar">
               <div className="mcs-fill" style={{
@@ -885,21 +969,22 @@ export default function GridWars() {
             <div className="grid-inner">
               <div className="grid-container">
                 <div className="grid" style={{gridTemplateColumns:`repeat(${GRID_COLS},${tileSize}px)`}}>
+                  {/* FIX #3: Render tiles from Map; O(1) lookup per tile */}
                   {Array.from({ length: TOTAL_TILES }, (_, i) => {
                     const tileId = i + 1;
-                    const tile = tiles.find(t => t.id === tileId);
-                    const ownerId = tile?.ownerId;
-                    const owner = ownerId ? leaderboard.find(l => l.userId === ownerId) : null;
+                    const ownerId = tileOwners.get(tileId) ?? null;
+                    // FIX #6: O(1) color lookup instead of leaderboard.find()
+                    const color = ownerId ? userColorMap.get(ownerId) : null;
                     const isMine = !!(me && ownerId && ownerId === me.id);
                     const isFlash = flashTiles.has(tileId);
                     return (
                       <div key={tileId}
-                        className={["tile",ownerId?"captured":"empty",isMine?"mine":"",isFlash?"flash":""].join(" ")}
+                        className={["tile", ownerId?"captured":"empty", isMine?"mine":"", isFlash?"flash":""].join(" ")}
                         style={{
-                          width:tileSize, height:tileSize,
-                          background: ownerId?(isMine?(me?.color||"var(--accent)"):(owner?.color||"#333")):undefined,
-                          boxShadow: isMine&&me?.color?`0 0 4px ${me.color}88`:undefined,
-                          opacity: gameOver&&!ownerId?0.5:1,
+                          width: tileSize, height: tileSize,
+                          background: color || (ownerId ? "#333" : undefined),
+                          boxShadow: isMine && me?.color ? `0 0 4px ${me.color}88` : undefined,
+                          opacity: gameOver && !ownerId ? 0.5 : 1,
                         }}
                         onClick={() => handleCapture(tileId)}
                       />
@@ -918,12 +1003,13 @@ export default function GridWars() {
             {events.length === 0
               ? <div style={{fontSize:9,color:"var(--muted)",textAlign:"center",padding:"10px 0"}}>Awaiting activity...</div>
               : events.map(ev => {
+                const color = userColorMap.get(ev.ownerId) || "var(--accent)";
                 const lb = leaderboard.find(l => l.userId === ev.ownerId);
                 return (
                   <div key={ev.id} className="event-item">
-                    <div className="event-dot" style={{background:lb?.color||"var(--accent)"}} />
+                    <div className="event-dot" style={{background: color}} />
                     <span style={{flex:1}}>
-                      <span style={{color:lb?.color||"var(--accent)"}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
+                      <span style={{color}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
                       {" "}took #{ev.tileId}
                     </span>
                     <span>{ev.time}</span>

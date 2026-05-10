@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -60,32 +61,40 @@ func (s *GameService) RemainingCooldown(userID string) float64 {
 	}
 	return (CAPTURE_COOLDOWN - elapsed).Seconds()
 }
-
 func (s *GameService) CaptureTile(ctx context.Context, tileID int, userID string) (*models.Tile, error) {
-	// ... cooldown check unchanged ...
-
-	// --- Capture in transaction ---
+	// --- Start transaction ---
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
+	// --- Capture tile ---
 	tile, err := s.tiles.Capture(ctx, tx, tileID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check unclaimed count INSIDE the transaction so we see consistent state
+	// --- Count remaining unclaimed tiles inside transaction ---
 	var unclaimed int
-	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM tiles WHERE owner_id IS NULL`).Scan(&unclaimed)
+	err = tx.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM tiles WHERE owner_id IS NULL`,
+	).Scan(&unclaimed)
+
 	if err != nil {
 		return nil, err
 	}
 
+	// --- Commit transaction ---
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+
+	// --- Save cooldown timestamp ---
+	s.cooldownMu.Lock()
+	s.lastCapture[userID] = time.Now()
+	s.cooldownMu.Unlock()
 
 	// --- Publish tile update ---
 	type TileUpdate struct {
@@ -93,16 +102,25 @@ func (s *GameService) CaptureTile(ctx context.Context, tileID int, userID string
 		ID      int     `json:"id"`
 		OwnerID *string `json:"ownerId"`
 	}
-	payload, _ := json.Marshal(TileUpdate{
+
+	payload, err := json.Marshal(TileUpdate{
 		Type:    "tile_update",
 		ID:      tile.ID,
 		OwnerID: tile.OwnerID,
 	})
-	s.rdb.Publish(ctx, "tile_updates", payload)
 
-	// Only trigger game over check if this capture left zero unclaimed tiles
+	if err == nil {
+		s.rdb.Publish(ctx, "tile_updates", payload)
+	}
+
+	// --- Trigger game over check if all tiles filled ---
 	if unclaimed == 0 {
-		go s.checkGameOver(context.Background())
+		go func() {
+			// Small delay prevents websocket race conditions
+			time.Sleep(2 * time.Second)
+
+			s.checkGameOver(context.Background())
+		}()
 	}
 
 	return tile, nil
@@ -117,23 +135,24 @@ func (s *GameService) checkGameOver(ctx context.Context) {
 	}
 
 	// Prevent duplicate triggers
-	    s.gameOverMu.Lock()
-    if s.gameOverFired {
-        s.gameOverMu.Unlock()
-        return
-    }
-    s.gameOverFired = true
-    s.gameOverMu.Unlock()
+	s.gameOverMu.Lock()
+	if s.gameOverFired {
+		s.gameOverMu.Unlock()
+		return
+	}
+	s.gameOverFired = true
+	s.gameOverMu.Unlock()
 
-    // Build leaderboard
-    rows, err := s.db.Query(ctx, `
-        SELECT u.id, u.name, u.color, COUNT(t.id) as count
-        FROM users u
-        LEFT JOIN tiles t ON t.owner_id = u.id
-        GROUP BY u.id
-        ORDER BY count DESC
-    `)
+	// Build leaderboard
+	rows, err := s.db.Query(ctx, `
+		SELECT u.id, u.name, u.color, COUNT(t.id) as count
+		FROM users u
+		LEFT JOIN tiles t ON t.owner_id = u.id
+		GROUP BY u.id
+		ORDER BY count DESC
+	`)
 	if err != nil {
+		log.Println("checkGameOver: leaderboard query failed:", err)
 		return
 	}
 	defer rows.Close()
@@ -189,6 +208,7 @@ func (s *GameService) resetGame(ctx context.Context) {
 	// Clear all tile owners
 	_, err := s.db.Exec(ctx, `UPDATE tiles SET owner_id = NULL, updated_at = NOW()`)
 	if err != nil {
+		log.Println("resetGame: failed to reset tiles:", err)
 		return
 	}
 
