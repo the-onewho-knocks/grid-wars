@@ -6,7 +6,7 @@ const API_BASE = "http://localhost:8080";
 const GRID_COLS = 40;
 const GRID_ROWS = 25;
 const TOTAL_TILES = 1000;
-const CAPTURE_COOLDOWN = 1;
+const CAPTURE_COOLDOWN = 3;
 const STEAL_THRESHOLD = 5; // must match backend
 
 const PRESET_COLORS = [
