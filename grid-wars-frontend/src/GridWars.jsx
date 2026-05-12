@@ -1,15 +1,22 @@
+
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-const API_BASE = "https://grid-wars-production.up.railway.app";
+const API_BASE = "http://localhost:8080";
 
 const GRID_COLS = 40;
 const GRID_ROWS = 25;
 const TOTAL_TILES = 1000;
-const CAPTURE_COOLDOWN = 3;
+const CAPTURE_COOLDOWN = 1;
+const STEAL_THRESHOLD = 5; // must match backend
 
 const PRESET_COLORS = [
   "#FF2D55", "#FF9500", "#FFCC00", "#34C759", "#00C7BE",
-  "#007AFF", "#5856D6", "#AF52DE", "#FF375F", "#30D158",
+  "#007AFF", "#5856D6", "#AF52DE", "#FF6B6B",  "#C34A36",
+   "#2C73D2", // royal blue
+  "#008E9B", // cyan teal
+  "#FFC75F", // warm peach
+  "#F24C4C", // strong red
+  "#5DD39E", // pastel mint
 ];
 
 function darken(hex, amount = 40) {
@@ -21,6 +28,11 @@ function darken(hex, amount = 40) {
 
 function genId() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+// Returns how many steals are allowed given unclaimed tiles claimed
+function stealAllowance(claimedCount) {
+  return Math.floor(claimedCount / STEAL_THRESHOLD);
 }
 
 const styles = `
@@ -38,6 +50,7 @@ const styles = `
     --gold: #FFD700;
     --silver: #C0C0C0;
     --bronze: #CD7F32;
+    --steal: #ff9500;
     --text: #e8f4f8;
     --muted: #4a6380;
     --grid-line: rgba(0, 240, 255, 0.06);
@@ -149,6 +162,38 @@ const styles = `
   .stat-value   { font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 900; color: var(--accent); }
   .stat-label   { font-size: 8px; letter-spacing: 2px; color: var(--muted); margin-top: 2px; }
 
+  /* ── Steal status card ── */
+  .steal-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 12px; margin-bottom: 14px;
+    position: relative; overflow: hidden;
+  }
+  .steal-card::before {
+    content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+    background: var(--steal);
+  }
+  .steal-card.has-steals { border-color: rgba(255,149,0,0.4); }
+  .steal-card-title {
+    font-family: 'Orbitron', sans-serif; font-size: 8px; font-weight: 700;
+    letter-spacing: 2px; color: var(--steal); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .steal-slots { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .steal-slot {
+    width: 18px; height: 18px; border-radius: 2px; border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; font-size: 9px;
+    transition: all 0.2s;
+  }
+  .steal-slot.filled   { background: var(--steal); border-color: var(--steal); color: var(--bg); }
+  .steal-slot.empty-slot { background: transparent; color: var(--muted); }
+  .steal-slot.locked   { background: transparent; border-style: dashed; color: var(--muted); opacity: 0.4; }
+  .steal-progress-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 4px;
+  }
+  .steal-progress-bar  { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .steal-progress-fill { height: 100%; background: var(--steal); border-radius: 2px; transition: width 0.4s ease; }
+  .steal-progress-label { font-size: 8px; color: var(--muted); letter-spacing: 1px; white-space: nowrap; }
+
   .btn {
     width: 100%; padding: 9px;
     font-family: 'Orbitron', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 2px;
@@ -221,6 +266,8 @@ const styles = `
     border: 1px solid var(--border);
     will-change: transform;
   }
+
+  /* ── Tile states ── */
   .tile {
     cursor: pointer; position: relative;
     transition: filter 0.1s;
@@ -230,8 +277,27 @@ const styles = `
   .tile:active { filter: brightness(2.5); transform: scale(0.88); transition: transform 0.05s; }
   .tile.empty  { background: #070d16; }
   .tile.mine::after { content: ''; position: absolute; inset: 0; border: 1px solid rgba(255,255,255,0.3); }
+
+  /* Stealable tile: pulsing orange border */
+  .tile.stealable::after {
+    content: ''; position: absolute; inset: 0;
+    border: 1px solid var(--steal);
+    animation: stealPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes stealPulse {
+    0%,100% { opacity: 0.5; box-shadow: inset 0 0 3px rgba(255,149,0,0.3); }
+    50%      { opacity: 1;   box-shadow: inset 0 0 6px rgba(255,149,0,0.6); }
+  }
+  /* Highlight on hover when stealable */
+  .tile.stealable:hover { filter: brightness(1.6) saturate(1.3); }
+
   .tile.flash  { animation: tileFlash 0.4s ease-out; }
+  .tile.steal-flash { animation: stealFlash 0.5s ease-out; }
   @keyframes tileFlash { 0%{filter:brightness(4) saturate(2)} 100%{filter:brightness(1)} }
+  @keyframes stealFlash {
+    0%   { filter: brightness(5) saturate(3) hue-rotate(20deg); }
+    100% { filter: brightness(1); }
+  }
 
   .progress-bar  { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 6px; }
   .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #007aff); transition: width 0.5s ease; }
@@ -263,6 +329,7 @@ const styles = `
   .toast.success { border-color: #34c759; color: #34c759; }
   .toast.error   { border-color: var(--accent2); color: var(--accent2); }
   .toast.info    { border-color: var(--accent);  color: var(--accent); }
+  .toast.steal   { border-color: var(--steal); color: var(--steal); }
   @keyframes toastIn  { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
   @keyframes toastOut { from{opacity:1} to{opacity:0} }
 
@@ -383,6 +450,16 @@ const styles = `
     .mcs-bar   { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
     .mcs-fill  { height: 100%; border-radius: 2px; transition: width 0.1s linear; }
 
+    /* Mobile steal pill shown in strip */
+    .mcs-steal-pill {
+      display: flex; align-items: center; gap: 4px;
+      background: rgba(255,149,0,0.12); border: 1px solid rgba(255,149,0,0.3);
+      border-radius: 10px; padding: 2px 7px; white-space: nowrap;
+    }
+    .mcs-steal-pill.locked { opacity: 0.4; }
+    .mcs-steal-icon { font-size: 10px; }
+    .mcs-steal-text { font-family: 'Orbitron', sans-serif; font-size: 9px; font-weight: 700; color: var(--steal); }
+
     .mobile-tabs {
       display: flex; flex-shrink: 0; height: var(--tab-h);
       background: var(--surface); border-top: 1px solid var(--border);
@@ -467,7 +544,62 @@ function CooldownRing({ remaining, total, size = 30 }) {
   );
 }
 
-// FIX #1: resetIn is captured at mount time; countdown resets correctly when gameOver changes
+// ── Steal Status Card ────────────────────────────────────────────────────────
+// Shows steal slots (used / available / locked), and progress toward next slot.
+function StealStatusCard({ claimedCount, stolenCount }) {
+  const allowance   = stealAllowance(claimedCount);
+  const slotsUsed   = stolenCount;
+  const slotsLeft   = Math.max(0, allowance - slotsUsed);
+  // Progress within current bracket: how far to next unlock
+  const nextUnlock  = (Math.floor(claimedCount / STEAL_THRESHOLD) + 1) * STEAL_THRESHOLD;
+  const bracketProgress = allowance === 0
+    ? (claimedCount / STEAL_THRESHOLD) * 100
+    : ((claimedCount % STEAL_THRESHOLD) / STEAL_THRESHOLD) * 100;
+
+  // Show max 6 slots in the card to avoid overflow
+  const displaySlots = Math.max(allowance + 1, 1);
+
+  return (
+    <div className={`steal-card ${slotsLeft > 0 ? "has-steals" : ""}`}>
+      <div className="steal-card-title">
+        ⚔ STEAL POWER
+      </div>
+
+      <div className="steal-slots">
+        {Array.from({ length: Math.min(displaySlots, 6) }, (_, i) => {
+          if (i < slotsUsed)   return <div key={i} className="steal-slot filled"  title="Steal used">✓</div>;
+          if (i < allowance)   return <div key={i} className="steal-slot empty-slot" title="Steal available">⚔</div>;
+          return                      <div key={i} className="steal-slot locked"  title="Locked — claim more tiles">🔒</div>;
+        })}
+        {displaySlots > 6 && (
+          <div style={{fontSize:9,color:"var(--steal)",alignSelf:"center",letterSpacing:1}}>
+            +{displaySlots - 6}
+          </div>
+        )}
+      </div>
+
+      <div style={{fontSize:9,color:"var(--muted)",letterSpacing:1,marginBottom:6}}>
+        {slotsLeft > 0
+          ? <span style={{color:"var(--steal)"}}>
+              {slotsLeft} STEAL{slotsLeft !== 1 ? "S" : ""} AVAILABLE — CLICK AN ENEMY TILE
+            </span>
+          : allowance === 0
+          ? <span>CLAIM {STEAL_THRESHOLD} TILES TO UNLOCK</span>
+          : <span>ALL SLOTS USED — CLAIM {nextUnlock - claimedCount} MORE TO UNLOCK NEXT</span>
+        }
+      </div>
+
+      <div className="steal-progress-row">
+        <div className="steal-progress-label">{claimedCount % STEAL_THRESHOLD}/{STEAL_THRESHOLD}</div>
+        <div className="steal-progress-bar">
+          <div className="steal-progress-fill" style={{ width: `${bracketProgress}%` }} />
+        </div>
+        <div className="steal-progress-label">+1 SLOT</div>
+      </div>
+    </div>
+  );
+}
+
 function GameOverOverlay({ gameOver, me, resetIn }) {
   const [countdown, setCountdown] = useState(resetIn);
 
@@ -479,15 +611,13 @@ function GameOverOverlay({ gameOver, me, resetIn }) {
       return c - 1;
     }), 1000);
     return () => clearInterval(iv);
-  }, [resetIn, gameOver]); // re-run when gameOver object changes (new round)
+  }, [resetIn, gameOver]);
 
   if (!gameOver) return null;
   const { winner, rankings } = gameOver;
-
-  // FIX #2: rankings from game_over use userId, me.id is the local genId() value — match correctly
   const myRankIndex = me ? rankings.findIndex(r => r.userId === me.id) : -1;
-  const isWinner = me && winner.userId === me.id;
-  const medals = ["🥇","🥈","🥉"];
+  const isWinner    = me && winner.userId === me.id;
+  const medals      = ["🥇","🥈","🥉"];
 
   return (
     <div className="gameover-overlay">
@@ -548,26 +678,33 @@ const RankIcon  = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const FeedIcon  = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
 
 export default function GridWars() {
-  // FIX #3: Store tiles as a Map (id -> ownerId) instead of an array
-  // This makes tile lookups O(1) instead of O(n) per tile per render
-  const [tileOwners, setTileOwners] = useState(() => new Map());
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [me, setMe] = useState(null);
-  const [wsStatus, setWsStatus] = useState("disconnected");
-  const [flashTiles, setFlashTiles] = useState(new Set());
-  const [events, setEvents] = useState([]);
-  const [showRegister, setShowRegister] = useState(true);
-  const [tileSize, setTileSize] = useState(14);
-  const [gameOver, setGameOver] = useState(null);
+  const [tileOwners, setTileOwners]       = useState(() => new Map());
+  const [leaderboard, setLeaderboard]     = useState([]);
+  const [me, setMe]                       = useState(null);
+  const [wsStatus, setWsStatus]           = useState("disconnected");
+  const [flashTiles, setFlashTiles]       = useState(new Set());
+  const [stealFlashTiles, setStealFlashTiles] = useState(new Set());
+  const [events, setEvents]               = useState([]);
+  const [showRegister, setShowRegister]   = useState(true);
+  const [tileSize, setTileSize]           = useState(14);
+  const [gameOver, setGameOver]           = useState(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
-  const [activeTab, setActiveTab] = useState(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab]         = useState(null);
+  const [isMobile, setIsMobile]           = useState(false);
+
+  // ── Steal tracking (mirrors backend in-memory state) ──
+  // claimedCount: unclaimed→owned captures this game (drives allowance)
+  // stolenCount:  steals used this game
+  const [claimedCount, setClaimedCount]   = useState(0);
+  const [stolenCount, setStolenCount]     = useState(0);
+
   const cooldownRef = useRef(null);
-  const wsRef = useRef(null);
-  const toastRef = useRef(null);
+  const wsRef       = useRef(null);
+  const toastRef    = useRef(null);
   const { toasts, add: toast } = useToast();
-  toastRef.current = toast; // FIX #4: keep toast ref fresh to avoid stale closure in WS handler
-  const [formName, setFormName] = useState("");
+  toastRef.current = toast;
+
+  const [formName,  setFormName]  = useState("");
   const [formColor, setFormColor] = useState(PRESET_COLORS[0]);
 
   useEffect(() => {
@@ -590,9 +727,8 @@ export default function GridWars() {
 
   const loadTiles = useCallback(async () => {
     try {
-      const r = await fetch(`${API_BASE}/tiles`);
+      const r   = await fetch(`${API_BASE}/tiles`);
       const arr = (await r.json()) || [];
-      // FIX #3 continued: convert array to Map on load
       setTileOwners(new Map(arr.map(t => [t.id, t.ownerId ?? null])));
     } catch { toastRef.current("Failed to load tiles", "error"); }
   }, []);
@@ -607,19 +743,20 @@ export default function GridWars() {
   useEffect(() => {
     loadTiles();
     loadLeaderboard();
-    // FIX #5: Poll leaderboard every 8s, but NOT on every tile_update WebSocket message.
-    // The WS message only triggers a leaderboard refresh when needed (game_over / new_game).
     const iv = setInterval(loadLeaderboard, 8000);
     return () => clearInterval(iv);
   }, []);
 
-  // FIX #6: Build a stable userColorMap from leaderboard + me so tile rendering
-  // doesn't need to call leaderboard.find() (O(n)) for every tile on every render.
   const userColorMap = useMemo(() => {
     const map = new Map(leaderboard.map(e => [e.userId, e.color]));
-    if (me) map.set(me.id, me.color); // always include self even if not in leaderboard yet
+    if (me) map.set(me.id, me.color);
     return map;
   }, [leaderboard, me]);
+
+  // Derived steal state
+  const stealAllowanceCount = stealAllowance(claimedCount);
+  const stealsLeft          = Math.max(0, stealAllowanceCount - stolenCount);
+  const canSteal            = stealsLeft > 0;
 
   useEffect(() => {
     let reconnectTimer = null;
@@ -628,17 +765,15 @@ export default function GridWars() {
       const sock = new WebSocket(API_BASE.replace(/^http/, "ws") + "/ws");
       wsRef.current = sock;
 
-    sock.onopen = () => {
-      setWsStatus("connected");
-      toastRef.current("Live connection established", "success");
-      // Sync state in case we missed a new_game event while disconnected
-      loadTiles();
-      loadLeaderboard();
-    };
+      sock.onopen = () => {
+        setWsStatus("connected");
+        toastRef.current("Live connection established", "success");
+        loadTiles();
+        loadLeaderboard();
+      };
 
       sock.onclose = () => {
         setWsStatus("disconnected");
-        // FIX #7: Use ref-based reconnect so we always call the latest connect()
         reconnectTimer = setTimeout(connect, 3000);
       };
 
@@ -649,31 +784,34 @@ export default function GridWars() {
           const msg = JSON.parse(e.data);
 
           if (msg.type === "tile_update") {
-            // FIX #3 continued: update Map entry directly, no array scan
+            const wasSteal = msg.stolen === true;
             setTileOwners(prev => {
               const next = new Map(prev);
               next.set(msg.id, msg.ownerId ?? null);
               return next;
             });
-            setFlashTiles(f => new Set([...f, msg.id]));
-            setTimeout(() => setFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 500);
+            // Use distinct flash animations for steals vs normal captures
+            if (wasSteal) {
+              setStealFlashTiles(f => new Set([...f, msg.id]));
+              setTimeout(() => setStealFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 600);
+            } else {
+              setFlashTiles(f => new Set([...f, msg.id]));
+              setTimeout(() => setFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 500);
+            }
             setEvents(prev => [{
-              id: Date.now() + Math.random(), tileId: msg.id, ownerId: msg.ownerId,
+              id: Date.now() + Math.random(),
+              tileId: msg.id,
+              ownerId: msg.ownerId,
+              previousOwner: msg.previousOwner ?? null,
+              stolen: wasSteal,
               time: new Date().toLocaleTimeString("en", { hour12: false }),
             }, ...prev.slice(0, 49)]);
-            // FIX #5: Don't call loadLeaderboard() here — it fires on every capture and
-            // hammers the server during a full game. The 8s poll is sufficient.
           }
 
           if (msg.type === "game_over") {
-            // FIX #8: Immediately update leaderboard from game_over payload so
-            // userColorMap is correct when the overlay renders, without waiting for a poll.
             if (msg.rankings?.length) {
               setLeaderboard(msg.rankings.map(r => ({
-                userId: r.userId,
-                name: r.name,
-                color: r.color,
-                count: r.count,
+                userId: r.userId, name: r.name, color: r.color, count: r.count,
               })));
             }
             setGameOver({ winner: msg.winner, rankings: msg.rankings, resetIn: msg.resetIn });
@@ -681,20 +819,35 @@ export default function GridWars() {
           }
 
           if (msg.type === "new_game") {
-            setGameOver(null);
-            // FIX #9: Reset tile owners Map instead of mapping over old array
-            setTileOwners(prev => {
-              const next = new Map();
-              for (const [id] of prev) next.set(id, null);
-              return next;
-            });
-            setEvents([]);
-            setCooldownRemaining(0);
-            if (cooldownRef.current) clearInterval(cooldownRef.current);
-            toastRef.current("🚀 NEW GAME STARTED!", "success");
-            // Reload tiles to ensure DB state matches (handles any missed updates)
-            loadTiles();
-            loadLeaderboard();
+  setGameOver(null);
+
+    setTileOwners(prev => {
+      const next = new Map();
+      for (const [id] of prev) next.set(id, null);
+      return next;
+    });
+
+    setEvents([]);
+    setCooldownRemaining(0);
+
+    if (cooldownRef.current) {
+      clearInterval(cooldownRef.current);
+    }
+
+    // Reset steal system
+    setClaimedCount(0);
+    setStolenCount(0);
+
+    // Force re-registration
+    setMe(null);
+    setShowRegister(true);
+    setFormName("");
+    setFormColor(PRESET_COLORS[0]);
+
+    toastRef.current("🚀 NEW GAME STARTED!", "success");
+
+  loadTiles();
+  loadLeaderboard();
           }
         } catch {}
       };
@@ -706,7 +859,7 @@ export default function GridWars() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (cooldownRef.current) clearInterval(cooldownRef.current);
     };
-  }, []); // runs once
+  }, []);
 
   const handleRegister = async () => {
     if (!formName.trim()) return toast("Name required", "error");
@@ -720,40 +873,79 @@ export default function GridWars() {
       setMe({ id: userId, name: formName.trim(), color: formColor });
       setShowRegister(false);
       toast(`Welcome, ${formName.trim()}!`, "success");
-      loadLeaderboard(); // refresh so our entry appears
+      loadLeaderboard();
     } catch (err) { toast(err.message, "error"); }
   };
 
   const handleCapture = async (tileId) => {
-    if (!me) { toast("Register first!", "error"); return; }
+    if (!me)                { toast("Register first!", "error"); return; }
     if (cooldownRemaining > 0) { toast(`Wait ${Math.ceil(cooldownRemaining)}s`, "error"); return; }
-    if (gameOver) { toast("Wait for new game!", "error"); return; }
+    if (gameOver)           { toast("Wait for new game!", "error"); return; }
     if (isMobile && activeTab !== null) setActiveTab(null);
+
+    // Check whether this click is on an enemy tile (steal attempt)
+    const currentOwner = tileOwners.get(tileId) ?? null;
+    const isEnemyTile  = currentOwner !== null && currentOwner !== me.id;
+
+    // Fast client-side steal gate — saves a round-trip for obvious failures
+    if (isEnemyTile && !canSteal) {
+      if (stealAllowanceCount === 0) {
+        toast(`Need ${STEAL_THRESHOLD} claimed tiles to steal — you have ${claimedCount}`, "error");
+      } else {
+        const nextUnlock = (Math.floor(claimedCount / STEAL_THRESHOLD) + 1) * STEAL_THRESHOLD;
+        toast(`All steal slots used — claim ${nextUnlock - claimedCount} more tiles to unlock next slot`, "error");
+      }
+      return;
+    }
+
     try {
       const r = await fetch(`${API_BASE}/capture`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tileId, userId: me.id }),
       });
+
       if (r.status === 429) {
         const data = await r.json();
-        const rem = data.remaining || CAPTURE_COOLDOWN;
+        const rem  = data.remaining || CAPTURE_COOLDOWN;
         setCooldownRemaining(rem);
         if (cooldownRef.current) clearInterval(cooldownRef.current);
         cooldownRef.current = setInterval(() => {
-          setCooldownRemaining(c => { if(c<=0.1){clearInterval(cooldownRef.current);return 0;} return c-0.1; });
+          setCooldownRemaining(c => { if (c <= 0.1) { clearInterval(cooldownRef.current); return 0; } return c - 0.1; });
         }, 100);
-        toast(`Cooldown! ${rem.toFixed(1)}s`, "error"); return;
+        toast(`Cooldown! ${rem.toFixed(1)}s`, "error");
+        return;
       }
-      if (!r.ok) { toast(await r.text() || "Already claimed", "error"); return; }
+
+      if (!r.ok) {
+        const errText = await r.text() || "Capture failed";
+        toast(errText, "error");
+        return;
+      }
+
       const tile = await r.json();
-      // Update our local Map optimistically (WS will also come in, idempotent)
+
+      // Optimistic map update
       setTileOwners(prev => { const next = new Map(prev); next.set(tile.id, tile.ownerId); return next; });
       startCooldown();
-      toast(`Tile #${tile.id} captured! ✓`, "success");
+
+      if (isEnemyTile) {
+        // It was a steal
+        setStolenCount(c => c + 1);
+        toast(`⚔ Tile #${tile.id} stolen! ${stealsLeft - 1} steal${stealsLeft - 1 !== 1 ? "s" : ""} remaining`, "steal");
+      } else {
+        // Normal unclaimed capture — advance claimedCount
+        const newClaimed = claimedCount + 1;
+        setClaimedCount(newClaimed);
+        // Notify when a new steal slot unlocks
+        if (newClaimed % STEAL_THRESHOLD === 0) {
+          toast(`⚔ STEAL UNLOCKED! You can now steal ${stealAllowance(newClaimed) - stolenCount} tile${stealAllowance(newClaimed) - stolenCount !== 1 ? "s" : ""}`, "steal");
+        } else {
+          toast(`Tile #${tile.id} captured! ✓`, "success");
+        }
+      }
     } catch { toast("Capture failed", "error"); }
   };
 
-  // FIX #3 continued: derive stats from Map, O(n) single pass
   const { myTileCount, capturedCount } = useMemo(() => {
     let myTileCount = 0, capturedCount = 0;
     for (const [, ownerId] of tileOwners) {
@@ -809,6 +1001,10 @@ export default function GridWars() {
               <div className="progress-fill" style={{width:`${(myTileCount/TOTAL_TILES)*100}%`,background:`linear-gradient(90deg,${me.color},${darken(me.color,-30)})`}} />
             </div>
           </div>
+
+          {/* ── Steal status card in sidebar ── */}
+          <StealStatusCard claimedCount={claimedCount} stolenCount={stolenCount} />
+
           <button className="btn danger" style={{marginBottom:16}} onClick={()=>{setMe(null);setShowRegister(true);}}>
             ABANDON POST
           </button>
@@ -828,10 +1024,12 @@ export default function GridWars() {
         <div style={{fontSize:8,letterSpacing:2,color:"var(--muted)",marginBottom:6}}>HOW TO PLAY</div>
         <div style={{fontSize:10,color:"var(--muted)",lineHeight:1.9}}>
           <div>→ Tap any free tile to capture it</div>
-          <div>→ <span style={{color:"var(--accent2)"}}>3s cooldown</span> between captures</div>
+          <div>→ <span style={{color:"var(--accent2)"}}>1s cooldown</span> between captures</div>
+          <div>→ Claim 5 tiles → unlock <span style={{color:"var(--steal)"}}>⚔ 1 steal</span></div>
+          <div>→ Every +5 tiles = another steal slot</div>
+          <div>→ <span style={{color:"var(--steal)"}}>Pulsing tiles</span> = stealable</div>
           <div>→ Fill all 1000 tiles to end the round</div>
           <div>→ Most tiles = <span style={{color:"var(--gold)"}}>WIN</span></div>
-          <div>→ Grid resets automatically</div>
         </div>
       </div>
     </>
@@ -864,15 +1062,25 @@ export default function GridWars() {
       {events.length === 0
         ? <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",padding:"24px 0"}}>Awaiting activity...</div>
         : events.map(ev => {
-          // FIX #6 continued: O(1) color lookup from Map
           const color = userColorMap.get(ev.ownerId) || "var(--accent)";
-          const lb = leaderboard.find(l => l.userId === ev.ownerId);
+          const lb    = leaderboard.find(l => l.userId === ev.ownerId);
+          const prevLb = ev.previousOwner ? leaderboard.find(l => l.userId === ev.previousOwner) : null;
           return (
-            <div key={ev.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"var(--muted)",padding:"7px 0",borderBottom:"1px solid rgba(26,37,53,0.5)"}}>
+            <div key={ev.id} style={{
+              display:"flex", alignItems:"center", gap:6, fontSize:11,
+              color: ev.stolen ? "var(--steal)" : "var(--muted)",
+              padding:"7px 0", borderBottom:"1px solid rgba(26,37,53,0.5)"
+            }}>
               <div style={{width:6,height:6,borderRadius:"50%",background:color,flexShrink:0}} />
               <span style={{flex:1}}>
+                {ev.stolen && <span style={{color:"var(--steal)",fontWeight:"bold"}}>⚔ </span>}
                 <span style={{color}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
-                {" "}captured <span style={{color:"var(--text)"}}>#{ev.tileId}</span>
+                {ev.stolen
+                  ? <> stole <span style={{color:"var(--text)"}}>#{ev.tileId}</span>
+                      {prevLb && <> from <span style={{color:userColorMap.get(ev.previousOwner)||"var(--muted)"}}>{prevLb.name}</span></>}
+                    </>
+                  : <> captured <span style={{color:"var(--text)"}}>#{ev.tileId}</span></>
+                }
               </span>
               <span style={{flexShrink:0,fontSize:9}}>{ev.time}</span>
             </div>
@@ -935,6 +1143,23 @@ export default function GridWars() {
                 {capturedCount}/{TOTAL_TILES} TILES
               </span>
             )}
+            {/* Steal status chip in header (desktop) */}
+            {!isMobile && me && (
+              <div style={{
+                display:"flex", alignItems:"center", gap:6,
+                background: canSteal ? "rgba(255,149,0,0.1)" : "var(--surface2)",
+                border: `1px solid ${canSteal ? "rgba(255,149,0,0.4)" : "var(--border)"}`,
+                borderRadius:3, padding:"4px 10px", fontSize:10, letterSpacing:1,
+                color: canSteal ? "var(--steal)" : "var(--muted)",
+                transition:"all 0.3s",
+              }}>
+                <span>⚔</span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:900}}>
+                  {stealsLeft}
+                </span>
+                <span style={{fontSize:8}}>STEAL{stealsLeft !== 1 ? "S" : ""}</span>
+              </div>
+            )}
           </div>
           <div className="header-right">
             <div className="ws-indicator">
@@ -959,6 +1184,13 @@ export default function GridWars() {
             <span className="mcs-val" style={{color:isReady?"#34c759":"var(--accent2)"}}>
               {isReady?"READY":`${cooldownRemaining.toFixed(1)}s`}
             </span>
+            {/* Steal pill in mobile strip */}
+            {me && (
+              <div className={`mcs-steal-pill ${!canSteal ? "locked" : ""}`}>
+                <span className="mcs-steal-icon">⚔</span>
+                <span className="mcs-steal-text">{stealsLeft}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -969,22 +1201,32 @@ export default function GridWars() {
             <div className="grid-inner">
               <div className="grid-container">
                 <div className="grid" style={{gridTemplateColumns:`repeat(${GRID_COLS},${tileSize}px)`}}>
-                  {/* FIX #3: Render tiles from Map; O(1) lookup per tile */}
                   {Array.from({ length: TOTAL_TILES }, (_, i) => {
-                    const tileId = i + 1;
+                    const tileId  = i + 1;
                     const ownerId = tileOwners.get(tileId) ?? null;
-                    // FIX #6: O(1) color lookup instead of leaderboard.find()
-                    const color = ownerId ? userColorMap.get(ownerId) : null;
-                    const isMine = !!(me && ownerId && ownerId === me.id);
-                    const isFlash = flashTiles.has(tileId);
+                    const color   = ownerId ? userColorMap.get(ownerId) : null;
+                    const isMine  = !!(me && ownerId && ownerId === me.id);
+                    const isEnemy = !!(ownerId && !isMine);
+                    // A tile is visually "stealable" if it's enemy-owned and we have steals left
+                    const isStealable = isEnemy && canSteal;
+                    const isFlash      = flashTiles.has(tileId);
+                    const isStealFlash = stealFlashTiles.has(tileId);
                     return (
                       <div key={tileId}
-                        className={["tile", ownerId?"captured":"empty", isMine?"mine":"", isFlash?"flash":""].join(" ")}
+                        className={[
+                          "tile",
+                          ownerId ? "captured" : "empty",
+                          isMine      ? "mine"        : "",
+                          isStealable ? "stealable"   : "",
+                          isStealFlash? "steal-flash" : isFlash ? "flash" : "",
+                        ].join(" ")}
                         style={{
                           width: tileSize, height: tileSize,
                           background: color || (ownerId ? "#333" : undefined),
                           boxShadow: isMine && me?.color ? `0 0 4px ${me.color}88` : undefined,
                           opacity: gameOver && !ownerId ? 0.5 : 1,
+                          // Subtle orange tint on stealable tiles so they read even without the border
+                          filter: isStealable ? "saturate(0.7) brightness(0.85)" : undefined,
                         }}
                         onClick={() => handleCapture(tileId)}
                       />
@@ -1003,14 +1245,15 @@ export default function GridWars() {
             {events.length === 0
               ? <div style={{fontSize:9,color:"var(--muted)",textAlign:"center",padding:"10px 0"}}>Awaiting activity...</div>
               : events.map(ev => {
-                const color = userColorMap.get(ev.ownerId) || "var(--accent)";
-                const lb = leaderboard.find(l => l.userId === ev.ownerId);
+                const color  = userColorMap.get(ev.ownerId) || "var(--accent)";
+                const lb     = leaderboard.find(l => l.userId === ev.ownerId);
                 return (
                   <div key={ev.id} className="event-item">
-                    <div className="event-dot" style={{background: color}} />
-                    <span style={{flex:1}}>
+                    <div className="event-dot" style={{background: ev.stolen ? "var(--steal)" : color}} />
+                    <span style={{flex:1, color: ev.stolen ? "var(--steal)" : "inherit"}}>
+                      {ev.stolen && "⚔ "}
                       <span style={{color}}>{lb?.name||ev.ownerId?.slice(0,6)||"?"}</span>
-                      {" "}took #{ev.tileId}
+                      {ev.stolen ? " stole" : " took"} #{ev.tileId}
                     </span>
                     <span>{ev.time}</span>
                   </div>
