@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const API_BASE = "https://grid-wars-production-8354.up.railway.app";
@@ -7,16 +6,12 @@ const GRID_COLS = 40;
 const GRID_ROWS = 25;
 const TOTAL_TILES = 1000;
 const CAPTURE_COOLDOWN = 3;
-const STEAL_THRESHOLD = 5; // must match backend
+const STEAL_THRESHOLD = 5;
 
 const PRESET_COLORS = [
   "#FF2D55", "#FF9500", "#FFCC00", "#34C759", "#00C7BE",
   "#007AFF", "#5856D6", "#AF52DE", "#FF6B6B",  "#C34A36",
-   "#2C73D2", // royal blue
-  "#008E9B", // cyan teal
-  "#FFC75F", // warm peach
-  "#F24C4C", // strong red
-  "#5DD39E", // pastel mint
+  "#2C73D2", "#008E9B", "#FFC75F", "#F24C4C", "#5DD39E",
 ];
 
 function darken(hex, amount = 40) {
@@ -30,10 +25,15 @@ function genId() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-// Returns how many steals are allowed given unclaimed tiles claimed
 function stealAllowance(claimedCount) {
   return Math.floor(claimedCount / STEAL_THRESHOLD);
 }
+
+// ── Mobile tile size: fixed 16px so tiles are tappable; grid scrolls
+// ── Desktop tile size: calculated to fill available space
+const MOBILE_TILE_SIZE = 16;
+// Max drag distance (px) to still count as a tap (not a scroll)
+const TAP_THRESHOLD = 8;
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
@@ -65,6 +65,8 @@ const styles = `
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+    /* Prevent iOS rubber-band scroll on body */
+    overscroll-behavior: none;
   }
   #root { height: 100%; }
 
@@ -162,7 +164,6 @@ const styles = `
   .stat-value   { font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 900; color: var(--accent); }
   .stat-label   { font-size: 8px; letter-spacing: 2px; color: var(--muted); margin-top: 2px; }
 
-  /* ── Steal status card ── */
   .steal-card {
     background: var(--surface2); border: 1px solid var(--border);
     border-radius: 4px; padding: 10px 12px; margin-bottom: 14px;
@@ -184,14 +185,12 @@ const styles = `
     display: flex; align-items: center; justify-content: center; font-size: 9px;
     transition: all 0.2s;
   }
-  .steal-slot.filled   { background: var(--steal); border-color: var(--steal); color: var(--bg); }
-  .steal-slot.empty-slot { background: transparent; color: var(--muted); }
-  .steal-slot.locked   { background: transparent; border-style: dashed; color: var(--muted); opacity: 0.4; }
-  .steal-progress-row {
-    display: flex; align-items: center; gap: 8px; margin-top: 4px;
-  }
-  .steal-progress-bar  { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
-  .steal-progress-fill { height: 100%; background: var(--steal); border-radius: 2px; transition: width 0.4s ease; }
+  .steal-slot.filled    { background: var(--steal); border-color: var(--steal); color: var(--bg); }
+  .steal-slot.empty-slot{ background: transparent; color: var(--muted); }
+  .steal-slot.locked    { background: transparent; border-style: dashed; color: var(--muted); opacity: 0.4; }
+  .steal-progress-row   { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .steal-progress-bar   { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .steal-progress-fill  { height: 100%; background: var(--steal); border-radius: 2px; transition: width 0.4s ease; }
   .steal-progress-label { font-size: 8px; color: var(--muted); letter-spacing: 1px; white-space: nowrap; }
 
   .btn {
@@ -240,6 +239,7 @@ const styles = `
   .lb-name { flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lb-count { font-family: 'Orbitron', sans-serif; font-size: 10px; font-weight: 700; color: var(--accent); }
 
+  /* ── Grid area ── */
   .grid-area {
     grid-area: grid;
     display: flex; align-items: center; justify-content: center;
@@ -249,36 +249,54 @@ const styles = `
       linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
     background-size: 40px 40px;
   }
+
+  /* ── Scroll wrapper: fills grid-area, scrollable in both axes ── */
   .grid-scroll-wrap {
     width: 100%; height: 100%;
     overflow: auto;
-    display: flex; align-items: flex-start; justify-content: flex-start;
+    /* Use pan gestures so touch-scroll works when finger starts on a tile */
+    touch-action: pan-x pan-y;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* Scroll-shadow overlays (pure CSS, no extra elements) */
+    background:
+      linear-gradient(to right, var(--bg) 0%, transparent 24px)  left   / 24px 100% no-repeat,
+      linear-gradient(to left,  var(--bg) 0%, transparent 24px)  right  / 24px 100% no-repeat,
+      linear-gradient(to bottom,var(--bg) 0%, transparent 20px)  top    / 100% 20px no-repeat,
+      linear-gradient(to top,   var(--bg) 0%, transparent 20px)  bottom / 100% 20px no-repeat;
+    background-color: var(--bg);
+    background-attachment: local, local, local, local;
   }
   .grid-scroll-wrap::-webkit-scrollbar { width: 3px; height: 3px; }
-  .grid-scroll-wrap::-webkit-scrollbar-thumb { background: var(--border); }
-  .grid-inner { padding: 12px; flex-shrink: 0; }
+  .grid-scroll-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .grid-inner { padding: 12px; flex-shrink: 0; display: inline-block; }
 
   .grid {
     display: grid; gap: 1px;
     background: rgba(0,240,255,0.04); padding: 1px;
     border: 1px solid var(--border);
     will-change: transform;
+    /* Don't let the grid itself catch touch events — parent scroll-wrap handles them */
+    touch-action: none;
   }
 
   /* ── Tile states ── */
   .tile {
     cursor: pointer; position: relative;
     transition: filter 0.1s;
-    touch-action: manipulation;
+    /* Each tile: allow browser to call click/pointer events but grid handles panning */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
   .tile:hover  { filter: brightness(1.4); }
-  .tile:active { filter: brightness(2.5); transform: scale(0.88); transition: transform 0.05s; }
+  .tile.tapped { filter: brightness(2.5); transform: scale(0.88); transition: transform 0.05s; }
   .tile.empty  { background: #070d16; }
   .tile.mine::after { content: ''; position: absolute; inset: 0; border: 1px solid rgba(255,255,255,0.3); }
 
-  /* Stealable tile: pulsing orange border */
   .tile.stealable::after {
     content: ''; position: absolute; inset: 0;
     border: 1px solid var(--steal);
@@ -288,12 +306,11 @@ const styles = `
     0%,100% { opacity: 0.5; box-shadow: inset 0 0 3px rgba(255,149,0,0.3); }
     50%      { opacity: 1;   box-shadow: inset 0 0 6px rgba(255,149,0,0.6); }
   }
-  /* Highlight on hover when stealable */
   .tile.stealable:hover { filter: brightness(1.6) saturate(1.3); }
 
-  .tile.flash  { animation: tileFlash 0.4s ease-out; }
+  .tile.flash       { animation: tileFlash  0.4s ease-out; }
   .tile.steal-flash { animation: stealFlash 0.5s ease-out; }
-  @keyframes tileFlash { 0%{filter:brightness(4) saturate(2)} 100%{filter:brightness(1)} }
+  @keyframes tileFlash  { 0%{filter:brightness(4) saturate(2)} 100%{filter:brightness(1)} }
   @keyframes stealFlash {
     0%   { filter: brightness(5) saturate(3) hue-rotate(20deg); }
     100% { filter: brightness(1); }
@@ -429,17 +446,43 @@ const styles = `
   .reset-fill     { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width 1s linear; }
   .reset-num      { font-family: 'Orbitron', sans-serif; font-size: 16px; font-weight: 900; color: var(--accent); min-width: 24px; text-align: right; }
 
+  /* ───────────────────── MOBILE ───────────────────── */
   @media (max-width: 767px) {
     body { overflow: hidden; }
-    .app { display: flex; flex-direction: column; height: 100dvh; }
+    .app {
+      display: flex; flex-direction: column;
+      height: 100dvh; /* Use dvh so address bar doesn't overlap */
+    }
     .header { height: var(--header-h); padding: 0 12px; flex-shrink: 0; }
     .logo   { font-size: 15px; letter-spacing: 2px; }
     .cooldown-badge-text { display: none; }
     .sidebar-left, .sidebar-right, .footer { display: none; }
-    .grid-area { flex: 1; min-height: 0; align-items: flex-start; justify-content: flex-start; }
-    .grid-scroll-wrap { width: 100%; height: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Grid area fills all remaining space between cooldown strip and tabs */
+    .grid-area {
+      flex: 1; min-height: 0;
+      align-items: flex-start;
+      justify-content: flex-start;
+      overflow: hidden; /* Scroll wrapper handles it */
+    }
+
+    /* Scroll wrapper takes full width/height of grid-area */
+    .grid-scroll-wrap {
+      width: 100%; height: 100%;
+      overflow: auto;
+      touch-action: pan-x pan-y; /* ← KEY: allow panning over tiles */
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+
     .grid-inner { padding: 8px; }
 
+    /* Grid tiles: touch-action none so pointer events work,
+       but the SCROLL WRAPPER above handles panning */
+    .grid { touch-action: none; }
+    .tile { touch-action: none; }
+
+    /* ── Cooldown strip ── */
     .mobile-cooldown-strip {
       display: flex; align-items: center;
       padding: 5px 12px; background: var(--surface);
@@ -450,7 +493,6 @@ const styles = `
     .mcs-bar   { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
     .mcs-fill  { height: 100%; border-radius: 2px; transition: width 0.1s linear; }
 
-    /* Mobile steal pill shown in strip */
     .mcs-steal-pill {
       display: flex; align-items: center; gap: 4px;
       background: rgba(255,149,0,0.12); border: 1px solid rgba(255,149,0,0.3);
@@ -460,6 +502,7 @@ const styles = `
     .mcs-steal-icon { font-size: 10px; }
     .mcs-steal-text { font-family: 'Orbitron', sans-serif; font-size: 9px; font-weight: 700; color: var(--steal); }
 
+    /* ── Bottom tabs ── */
     .mobile-tabs {
       display: flex; flex-shrink: 0; height: var(--tab-h);
       background: var(--surface); border-top: 1px solid var(--border);
@@ -544,32 +587,24 @@ function CooldownRing({ remaining, total, size = 30 }) {
   );
 }
 
-// ── Steal Status Card ────────────────────────────────────────────────────────
-// Shows steal slots (used / available / locked), and progress toward next slot.
 function StealStatusCard({ claimedCount, stolenCount }) {
-  const allowance   = stealAllowance(claimedCount);
-  const slotsUsed   = stolenCount;
-  const slotsLeft   = Math.max(0, allowance - slotsUsed);
-  // Progress within current bracket: how far to next unlock
-  const nextUnlock  = (Math.floor(claimedCount / STEAL_THRESHOLD) + 1) * STEAL_THRESHOLD;
+  const allowance       = stealAllowance(claimedCount);
+  const slotsUsed       = stolenCount;
+  const slotsLeft       = Math.max(0, allowance - slotsUsed);
+  const nextUnlock      = (Math.floor(claimedCount / STEAL_THRESHOLD) + 1) * STEAL_THRESHOLD;
   const bracketProgress = allowance === 0
     ? (claimedCount / STEAL_THRESHOLD) * 100
     : ((claimedCount % STEAL_THRESHOLD) / STEAL_THRESHOLD) * 100;
-
-  // Show max 6 slots in the card to avoid overflow
   const displaySlots = Math.max(allowance + 1, 1);
 
   return (
     <div className={`steal-card ${slotsLeft > 0 ? "has-steals" : ""}`}>
-      <div className="steal-card-title">
-        ⚔ STEAL POWER
-      </div>
-
+      <div className="steal-card-title">⚔ STEAL POWER</div>
       <div className="steal-slots">
         {Array.from({ length: Math.min(displaySlots, 6) }, (_, i) => {
-          if (i < slotsUsed)   return <div key={i} className="steal-slot filled"  title="Steal used">✓</div>;
-          if (i < allowance)   return <div key={i} className="steal-slot empty-slot" title="Steal available">⚔</div>;
-          return                      <div key={i} className="steal-slot locked"  title="Locked — claim more tiles">🔒</div>;
+          if (i < slotsUsed) return <div key={i} className="steal-slot filled" title="Steal used">✓</div>;
+          if (i < allowance) return <div key={i} className="steal-slot empty-slot" title="Steal available">⚔</div>;
+          return <div key={i} className="steal-slot locked" title="Locked">🔒</div>;
         })}
         {displaySlots > 6 && (
           <div style={{fontSize:9,color:"var(--steal)",alignSelf:"center",letterSpacing:1}}>
@@ -577,18 +612,16 @@ function StealStatusCard({ claimedCount, stolenCount }) {
           </div>
         )}
       </div>
-
       <div style={{fontSize:9,color:"var(--muted)",letterSpacing:1,marginBottom:6}}>
         {slotsLeft > 0
           ? <span style={{color:"var(--steal)"}}>
-              {slotsLeft} STEAL{slotsLeft !== 1 ? "S" : ""} AVAILABLE — CLICK AN ENEMY TILE
+              {slotsLeft} STEAL{slotsLeft !== 1 ? "S" : ""} AVAILABLE — TAP AN ENEMY TILE
             </span>
           : allowance === 0
           ? <span>CLAIM {STEAL_THRESHOLD} TILES TO UNLOCK</span>
           : <span>ALL SLOTS USED — CLAIM {nextUnlock - claimedCount} MORE TO UNLOCK NEXT</span>
         }
       </div>
-
       <div className="steal-progress-row">
         <div className="steal-progress-label">{claimedCount % STEAL_THRESHOLD}/{STEAL_THRESHOLD}</div>
         <div className="steal-progress-bar">
@@ -691,16 +724,15 @@ export default function GridWars() {
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [activeTab, setActiveTab]         = useState(null);
   const [isMobile, setIsMobile]           = useState(false);
-
-  // ── Steal tracking (mirrors backend in-memory state) ──
-  // claimedCount: unclaimed→owned captures this game (drives allowance)
-  // stolenCount:  steals used this game
   const [claimedCount, setClaimedCount]   = useState(0);
   const [stolenCount, setStolenCount]     = useState(0);
 
   const cooldownRef = useRef(null);
   const wsRef       = useRef(null);
   const toastRef    = useRef(null);
+  // Touch-tracking ref: records {x, y} of touchstart to detect scroll vs tap
+  const touchStartRef = useRef(null);
+
   const { toasts, add: toast } = useToast();
   toastRef.current = toast;
 
@@ -753,44 +785,31 @@ export default function GridWars() {
     return map;
   }, [leaderboard, me]);
 
-  // Derived steal state
   const stealAllowanceCount = stealAllowance(claimedCount);
   const stealsLeft          = Math.max(0, stealAllowanceCount - stolenCount);
   const canSteal            = stealsLeft > 0;
 
   useEffect(() => {
     let reconnectTimer = null;
-
     function connect() {
       const sock = new WebSocket(API_BASE.replace(/^http/, "ws") + "/ws");
       wsRef.current = sock;
-
       sock.onopen = () => {
         setWsStatus("connected");
         toastRef.current("Live connection established", "success");
-        loadTiles();
-        loadLeaderboard();
+        loadTiles(); loadLeaderboard();
       };
-
       sock.onclose = () => {
         setWsStatus("disconnected");
         reconnectTimer = setTimeout(connect, 3000);
       };
-
       sock.onerror = () => setWsStatus("disconnected");
-
       sock.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-
           if (msg.type === "tile_update") {
             const wasSteal = msg.stolen === true;
-            setTileOwners(prev => {
-              const next = new Map(prev);
-              next.set(msg.id, msg.ownerId ?? null);
-              return next;
-            });
-            // Use distinct flash animations for steals vs normal captures
+            setTileOwners(prev => { const next = new Map(prev); next.set(msg.id, msg.ownerId ?? null); return next; });
             if (wasSteal) {
               setStealFlashTiles(f => new Set([...f, msg.id]));
               setTimeout(() => setStealFlashTiles(f => { const n = new Set(f); n.delete(msg.id); return n; }), 600);
@@ -800,59 +819,34 @@ export default function GridWars() {
             }
             setEvents(prev => [{
               id: Date.now() + Math.random(),
-              tileId: msg.id,
-              ownerId: msg.ownerId,
+              tileId: msg.id, ownerId: msg.ownerId,
               previousOwner: msg.previousOwner ?? null,
               stolen: wasSteal,
               time: new Date().toLocaleTimeString("en", { hour12: false }),
             }, ...prev.slice(0, 49)]);
           }
-
           if (msg.type === "game_over") {
             if (msg.rankings?.length) {
-              setLeaderboard(msg.rankings.map(r => ({
-                userId: r.userId, name: r.name, color: r.color, count: r.count,
-              })));
+              setLeaderboard(msg.rankings.map(r => ({ userId: r.userId, name: r.name, color: r.color, count: r.count })));
             }
             setGameOver({ winner: msg.winner, rankings: msg.rankings, resetIn: msg.resetIn });
             toastRef.current("🏆 GAME OVER! All tiles captured!", "info");
           }
-
           if (msg.type === "new_game") {
-  setGameOver(null);
-
-    setTileOwners(prev => {
-      const next = new Map();
-      for (const [id] of prev) next.set(id, null);
-      return next;
-    });
-
-    setEvents([]);
-    setCooldownRemaining(0);
-
-    if (cooldownRef.current) {
-      clearInterval(cooldownRef.current);
-    }
-
-    // Reset steal system
-    setClaimedCount(0);
-    setStolenCount(0);
-
-    // Force re-registration
-    setMe(null);
-    setShowRegister(true);
-    setFormName("");
-    setFormColor(PRESET_COLORS[0]);
-
-    toastRef.current("🚀 NEW GAME STARTED!", "success");
-
-  loadTiles();
-  loadLeaderboard();
+            setGameOver(null);
+            setTileOwners(prev => { const next = new Map(); for (const [id] of prev) next.set(id, null); return next; });
+            setEvents([]);
+            setCooldownRemaining(0);
+            if (cooldownRef.current) clearInterval(cooldownRef.current);
+            setClaimedCount(0); setStolenCount(0);
+            setMe(null); setShowRegister(true);
+            setFormName(""); setFormColor(PRESET_COLORS[0]);
+            toastRef.current("🚀 NEW GAME STARTED!", "success");
+            loadTiles(); loadLeaderboard();
           }
         } catch {}
       };
     }
-
     connect();
     return () => {
       wsRef.current?.close();
@@ -877,17 +871,15 @@ export default function GridWars() {
     } catch (err) { toast(err.message, "error"); }
   };
 
-  const handleCapture = async (tileId) => {
+  const handleCapture = useCallback(async (tileId) => {
     if (!me)                { toast("Register first!", "error"); return; }
     if (cooldownRemaining > 0) { toast(`Wait ${Math.ceil(cooldownRemaining)}s`, "error"); return; }
     if (gameOver)           { toast("Wait for new game!", "error"); return; }
     if (isMobile && activeTab !== null) setActiveTab(null);
 
-    // Check whether this click is on an enemy tile (steal attempt)
     const currentOwner = tileOwners.get(tileId) ?? null;
     const isEnemyTile  = currentOwner !== null && currentOwner !== me.id;
 
-    // Fast client-side steal gate — saves a round-trip for obvious failures
     if (isEnemyTile && !canSteal) {
       if (stealAllowanceCount === 0) {
         toast(`Need ${STEAL_THRESHOLD} claimed tiles to steal — you have ${claimedCount}`, "error");
@@ -923,20 +915,15 @@ export default function GridWars() {
       }
 
       const tile = await r.json();
-
-      // Optimistic map update
       setTileOwners(prev => { const next = new Map(prev); next.set(tile.id, tile.ownerId); return next; });
       startCooldown();
 
       if (isEnemyTile) {
-        // It was a steal
         setStolenCount(c => c + 1);
         toast(`⚔ Tile #${tile.id} stolen! ${stealsLeft - 1} steal${stealsLeft - 1 !== 1 ? "s" : ""} remaining`, "steal");
       } else {
-        // Normal unclaimed capture — advance claimedCount
         const newClaimed = claimedCount + 1;
         setClaimedCount(newClaimed);
-        // Notify when a new steal slot unlocks
         if (newClaimed % STEAL_THRESHOLD === 0) {
           toast(`⚔ STEAL UNLOCKED! You can now steal ${stealAllowance(newClaimed) - stolenCount} tile${stealAllowance(newClaimed) - stolenCount !== 1 ? "s" : ""}`, "steal");
         } else {
@@ -944,7 +931,24 @@ export default function GridWars() {
         }
       }
     } catch { toast("Capture failed", "error"); }
-  };
+  }, [me, cooldownRemaining, gameOver, isMobile, activeTab, tileOwners, canSteal,
+      stealAllowanceCount, claimedCount, stolenCount, stealsLeft, startCooldown]);
+
+  // ── Tile size: fixed 16px on mobile (scrollable), calculated on desktop ──
+  useEffect(() => {
+    const update = () => {
+      if (window.innerWidth < 768) {
+        setTileSize(MOBILE_TILE_SIZE);
+      } else {
+        const vw = window.innerWidth - 260 - 240 - 20;
+        const vh = window.innerHeight - 52 - 32 - 20;
+        setTileSize(Math.max(8, Math.min(Math.floor(Math.min(vw/GRID_COLS, vh/GRID_ROWS)), 24)));
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [isMobile]);
 
   const { myTileCount, capturedCount } = useMemo(() => {
     let myTileCount = 0, capturedCount = 0;
@@ -962,22 +966,26 @@ export default function GridWars() {
   const isReady   = cooldownRemaining <= 0;
   const myRankNum = me ? leaderboard.findIndex(l => l.userId === me.id) + 1 : 0;
 
-  useEffect(() => {
-    const update = () => {
-      if (window.innerWidth < 768) {
-        const vw = window.innerWidth - 16;
-        const vh = window.innerHeight - 52 - 34 - 60 - 16;
-        setTileSize(Math.max(10, Math.min(Math.floor(Math.min(vw/GRID_COLS, vh/GRID_ROWS)), 18)));
-      } else {
-        const vw = window.innerWidth - 260 - 240 - 20;
-        const vh = window.innerHeight - 52 - 32 - 20;
-        setTileSize(Math.max(8, Math.min(Math.floor(Math.min(vw/GRID_COLS, vh/GRID_ROWS)), 24)));
-      }
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [isMobile]);
+  // ── Touch handlers: distinguish tap from scroll ──
+  // touchstart on the scroll wrapper records position
+  // touchend on a tile checks distance — if < TAP_THRESHOLD, fire capture
+  const handleTilePointerDown = useCallback((e) => {
+    // Record position from mouse or first touch
+    const point = e.touches ? e.touches[0] : e;
+    touchStartRef.current = { x: point.clientX, y: point.clientY };
+  }, []);
+
+  const handleTilePointerUp = useCallback((e, tileId) => {
+    if (!touchStartRef.current) return;
+    const point = e.changedTouches ? e.changedTouches[0] : e;
+    const dx = Math.abs(point.clientX - touchStartRef.current.x);
+    const dy = Math.abs(point.clientY - touchStartRef.current.y);
+    touchStartRef.current = null;
+    // Only fire if finger barely moved (tap, not scroll)
+    if (dx < TAP_THRESHOLD && dy < TAP_THRESHOLD) {
+      handleCapture(tileId);
+    }
+  }, [handleCapture]);
 
   const StatsContent = () => (
     <>
@@ -1001,10 +1009,7 @@ export default function GridWars() {
               <div className="progress-fill" style={{width:`${(myTileCount/TOTAL_TILES)*100}%`,background:`linear-gradient(90deg,${me.color},${darken(me.color,-30)})`}} />
             </div>
           </div>
-
-          {/* ── Steal status card in sidebar ── */}
           <StealStatusCard claimedCount={claimedCount} stolenCount={stolenCount} />
-
           <button className="btn danger" style={{marginBottom:16}} onClick={()=>{setMe(null);setShowRegister(true);}}>
             ABANDON POST
           </button>
@@ -1024,12 +1029,13 @@ export default function GridWars() {
         <div style={{fontSize:8,letterSpacing:2,color:"var(--muted)",marginBottom:6}}>HOW TO PLAY</div>
         <div style={{fontSize:10,color:"var(--muted)",lineHeight:1.9}}>
           <div>→ Tap any free tile to capture it</div>
-          <div>→ <span style={{color:"var(--accent2)"}}>1s cooldown</span> between captures</div>
+          <div>→ <span style={{color:"var(--accent2)"}}>3s cooldown</span> between captures</div>
           <div>→ Claim 5 tiles → unlock <span style={{color:"var(--steal)"}}>⚔ 1 steal</span></div>
           <div>→ Every +5 tiles = another steal slot</div>
           <div>→ <span style={{color:"var(--steal)"}}>Pulsing tiles</span> = stealable</div>
           <div>→ Fill all 1000 tiles to end the round</div>
           <div>→ Most tiles = <span style={{color:"var(--gold)"}}>WIN</span></div>
+          {isMobile && <div>→ <span style={{color:"var(--accent)"}}>Scroll to pan</span> the grid</div>}
         </div>
       </div>
     </>
@@ -1062,8 +1068,8 @@ export default function GridWars() {
       {events.length === 0
         ? <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",padding:"24px 0"}}>Awaiting activity...</div>
         : events.map(ev => {
-          const color = userColorMap.get(ev.ownerId) || "var(--accent)";
-          const lb    = leaderboard.find(l => l.userId === ev.ownerId);
+          const color  = userColorMap.get(ev.ownerId) || "var(--accent)";
+          const lb     = leaderboard.find(l => l.userId === ev.ownerId);
           const prevLb = ev.previousOwner ? leaderboard.find(l => l.userId === ev.previousOwner) : null;
           return (
             <div key={ev.id} style={{
@@ -1093,13 +1099,10 @@ export default function GridWars() {
     <>
       <style>{styles}</style>
       <div className="scanline" />
-
       <div className="toast-container">
         {toasts.map(t => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}
       </div>
-
       {gameOver && <GameOverOverlay gameOver={gameOver} me={me} resetIn={gameOver.resetIn} />}
-
       {showRegister && !gameOver && (
         <div className="overlay">
           <div className="modal">
@@ -1143,20 +1146,16 @@ export default function GridWars() {
                 {capturedCount}/{TOTAL_TILES} TILES
               </span>
             )}
-            {/* Steal status chip in header (desktop) */}
             {!isMobile && me && (
               <div style={{
                 display:"flex", alignItems:"center", gap:6,
                 background: canSteal ? "rgba(255,149,0,0.1)" : "var(--surface2)",
                 border: `1px solid ${canSteal ? "rgba(255,149,0,0.4)" : "var(--border)"}`,
                 borderRadius:3, padding:"4px 10px", fontSize:10, letterSpacing:1,
-                color: canSteal ? "var(--steal)" : "var(--muted)",
-                transition:"all 0.3s",
+                color: canSteal ? "var(--steal)" : "var(--muted)", transition:"all 0.3s",
               }}>
                 <span>⚔</span>
-                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:900}}>
-                  {stealsLeft}
-                </span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:900}}>{stealsLeft}</span>
                 <span style={{fontSize:8}}>STEAL{stealsLeft !== 1 ? "S" : ""}</span>
               </div>
             )}
@@ -1169,6 +1168,7 @@ export default function GridWars() {
           </div>
         </header>
 
+        {/* ── Mobile cooldown + steal strip ── */}
         {isMobile && (
           <div className="mobile-cooldown-strip">
             <span className="mcs-label">TILES</span>
@@ -1184,7 +1184,6 @@ export default function GridWars() {
             <span className="mcs-val" style={{color:isReady?"#34c759":"var(--accent2)"}}>
               {isReady?"READY":`${cooldownRemaining.toFixed(1)}s`}
             </span>
-            {/* Steal pill in mobile strip */}
             {me && (
               <div className={`mcs-steal-pill ${!canSteal ? "locked" : ""}`}>
                 <span className="mcs-steal-icon">⚔</span>
@@ -1197,38 +1196,49 @@ export default function GridWars() {
         <aside className="sidebar sidebar-left"><StatsContent /></aside>
 
         <main className="grid-area">
+          {/*
+            ── Scroll wrapper: touch-action pan-x pan-y so the browser
+               handles panning natively. Tiles use touch-action:none so
+               pointer events bubble up, but the wrapper catches drags. ──
+          */}
           <div className="grid-scroll-wrap">
             <div className="grid-inner">
               <div className="grid-container">
-                <div className="grid" style={{gridTemplateColumns:`repeat(${GRID_COLS},${tileSize}px)`}}>
+                <div
+                  className="grid"
+                  style={{ gridTemplateColumns: `repeat(${GRID_COLS},${tileSize}px)` }}
+                >
                   {Array.from({ length: TOTAL_TILES }, (_, i) => {
-                    const tileId  = i + 1;
-                    const ownerId = tileOwners.get(tileId) ?? null;
-                    const color   = ownerId ? userColorMap.get(ownerId) : null;
-                    const isMine  = !!(me && ownerId && ownerId === me.id);
-                    const isEnemy = !!(ownerId && !isMine);
-                    // A tile is visually "stealable" if it's enemy-owned and we have steals left
+                    const tileId      = i + 1;
+                    const ownerId     = tileOwners.get(tileId) ?? null;
+                    const color       = ownerId ? userColorMap.get(ownerId) : null;
+                    const isMine      = !!(me && ownerId && ownerId === me.id);
+                    const isEnemy     = !!(ownerId && !isMine);
                     const isStealable = isEnemy && canSteal;
                     const isFlash      = flashTiles.has(tileId);
                     const isStealFlash = stealFlashTiles.has(tileId);
                     return (
-                      <div key={tileId}
+                      <div
+                        key={tileId}
                         className={[
                           "tile",
                           ownerId ? "captured" : "empty",
-                          isMine      ? "mine"        : "",
-                          isStealable ? "stealable"   : "",
-                          isStealFlash? "steal-flash" : isFlash ? "flash" : "",
+                          isMine       ? "mine"        : "",
+                          isStealable  ? "stealable"   : "",
+                          isStealFlash ? "steal-flash" : isFlash ? "flash" : "",
                         ].join(" ")}
                         style={{
                           width: tileSize, height: tileSize,
                           background: color || (ownerId ? "#333" : undefined),
                           boxShadow: isMine && me?.color ? `0 0 4px ${me.color}88` : undefined,
                           opacity: gameOver && !ownerId ? 0.5 : 1,
-                          // Subtle orange tint on stealable tiles so they read even without the border
                           filter: isStealable ? "saturate(0.7) brightness(0.85)" : undefined,
                         }}
-                        onClick={() => handleCapture(tileId)}
+                        // Desktop: plain click works fine
+                        onClick={!isMobile ? () => handleCapture(tileId) : undefined}
+                        // Mobile: use touch events with drag-distance guard
+                        onTouchStart={isMobile ? handleTilePointerDown : undefined}
+                        onTouchEnd={isMobile ? (e) => handleTilePointerUp(e, tileId) : undefined}
                       />
                     );
                   })}
@@ -1245,8 +1255,8 @@ export default function GridWars() {
             {events.length === 0
               ? <div style={{fontSize:9,color:"var(--muted)",textAlign:"center",padding:"10px 0"}}>Awaiting activity...</div>
               : events.map(ev => {
-                const color  = userColorMap.get(ev.ownerId) || "var(--accent)";
-                const lb     = leaderboard.find(l => l.userId === ev.ownerId);
+                const color = userColorMap.get(ev.ownerId) || "var(--accent)";
+                const lb    = leaderboard.find(l => l.userId === ev.ownerId);
                 return (
                   <div key={ev.id} className="event-item">
                     <div className="event-dot" style={{background: ev.stolen ? "var(--steal)" : color}} />
@@ -1284,7 +1294,8 @@ export default function GridWars() {
               { id:"ranks", label:"RANKS", Icon:RankIcon  },
               { id:"feed",  label:"FEED",  Icon:FeedIcon  },
             ].map(tab => (
-              <button key={String(tab.id)}
+              <button
+                key={String(tab.id)}
                 className={`mobile-tab ${activeTab===tab.id?"active":""}`}
                 onClick={() => setActiveTab(activeTab===tab.id&&tab.id!==null?null:tab.id)}
               >
