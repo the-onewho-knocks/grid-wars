@@ -60,8 +60,7 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{
 			"http://localhost:5173",
-			"https://grid-wars-hb.netlify.app",
-			"https://grid-wars-production.up.railway.app",
+			"https://gridwars1.netlify.app",
 		},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
