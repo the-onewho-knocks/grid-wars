@@ -5,7 +5,7 @@ const API_BASE = "https://grid-wars-production-8354.up.railway.app";
 const GRID_COLS = 40;
 const GRID_ROWS = 25;
 const TOTAL_TILES = 1000;
-const CAPTURE_COOLDOWN = 3;
+const CAPTURE_COOLDOWN = 2;
 const STEAL_THRESHOLD = 5;
 
 const PRESET_COLORS = [

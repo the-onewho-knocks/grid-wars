@@ -18,7 +18,7 @@ import (
 
 const (
 	TOTAL_TILES      = 1000
-	CAPTURE_COOLDOWN = 3 * time.Second  // per-user cooldown between captures
+	CAPTURE_COOLDOWN = 2 * time.Second  // per-user cooldown between captures
 	RESET_DELAY      = 20 * time.Second // countdown before new game starts
 	STEAL_THRESHOLD  = 5                // unclaimed tiles claimed per steal slot (5→1, 10→2, 15→3, …)
 )
