@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-const API_BASE = "http://localhost:8080";
+const API_BASE = "https://grid-wars-production-8354.up.railway.app";
 
 const GRID_COLS = 40;
 const GRID_ROWS = 25;
