@@ -46,7 +46,7 @@ This project showcases distributed state synchronization, clean architecture, an
 Strict separation between:
 
 - handlers (HTTP layer)
-- services (business logic)
+- services (Game logic)
 - repositories (data access)
 - realtime (WebSocket + Redis)
 - database layer
