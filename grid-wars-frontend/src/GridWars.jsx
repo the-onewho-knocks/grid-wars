@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+﻿import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const API_BASE = "https://grid-wars-production-8354.up.railway.app";
 
@@ -830,7 +830,7 @@ export default function GridWars() {
               setLeaderboard(msg.rankings.map(r => ({ userId: r.userId, name: r.name, color: r.color, count: r.count })));
             }
             setGameOver({ winner: msg.winner, rankings: msg.rankings, resetIn: msg.resetIn });
-            toastRef.current("🏆 GAME OVER! All tiles captured!", "info");
+            toastRef.current("GAME OVER! All tiles captured!", "info");
           }
           if (msg.type === "new_game") {
             setGameOver(null);
@@ -841,7 +841,7 @@ export default function GridWars() {
             setClaimedCount(0); setStolenCount(0);
             setMe(null); setShowRegister(true);
             setFormName(""); setFormColor(PRESET_COLORS[0]);
-            toastRef.current("🚀 NEW GAME STARTED!", "success");
+            toastRef.current(" NEW GAME STARTED!", "success");
             loadTiles(); loadLeaderboard();
           }
         } catch {}
